@@ -1,0 +1,3 @@
+F1 Clash AI Coach
+Version: 0.1.1-android-only
+Build: cloud/Android-only workflow
