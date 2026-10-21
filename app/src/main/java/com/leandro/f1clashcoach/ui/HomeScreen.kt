@@ -157,6 +157,15 @@ fun HomeScreen(
                             Text(data.flags?.let { "🏳 " + formatK(it.toLong()) } ?: "🏳 —", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
+                    // botão principal: abre o F1 Clash (liga a leitura antes, se precisar)
+                    Button(
+                        onClick = { if (readingOn) onOpenGame() else onStart() },
+                        colors = ButtonDefaults.buttonColors(containerColor = F1Red),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                    ) {
+                        Text(if (readingOn) "▶  Abrir F1 Clash" else "▶  Ligar leitura e abrir o F1 Clash", fontSize = 17.sp, fontWeight = FontWeight.Black)
+                    }
                     SeriesLadder(prog.currentSeries) { n -> series.firstOrNull { it.number == n }?.scoreMin?.let { prog.teamScore >= it } == true }
                     // a ação mais importante agora
                     plan.firstOrNull()?.let { top ->
