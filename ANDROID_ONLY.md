@@ -11,7 +11,9 @@ Você não precisa de Windows, PC ou Android Studio.
 5. Toque em **Run workflow**.
 6. Quando finalizar, abra a execução concluída.
 7. Em **Artifacts**, baixe **F1-Clash-AI-Coach-APK**.
-8. Abra o ZIP baixado e instale `F1-Clash-AI-Coach.apk`.
+8. Abra o ZIP baixado e instale `F1-Clash-Coach.apk`.
+
+Na branch `main` o APK também é publicado em **Releases** (download direto, sem ZIP).
 9. Se o Android bloquear a instalação, permita **Instalar apps desconhecidos** somente para o navegador/gerenciador usado.
 
 O APK é compilado na nuvem. O celular é usado apenas para enviar o projeto, iniciar o build, baixar e instalar.
