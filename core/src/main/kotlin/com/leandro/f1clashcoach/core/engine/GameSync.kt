@@ -90,14 +90,24 @@ object GameSync {
         // ---- Pilotos ----
         val drivers = g.drivers.toMutableList()
         fun findDriver(name: String) = drivers.indexOfFirst { key(it.name) == key(name) }
+        val unknown = com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN
+        // O mesmo piloto existe em 3 raridades (cartas azul/laranja/roxa): casa por nome + raridade.
+        fun findTile(t: GridTile): Int {
+            val same = drivers.indices.filter { key(drivers[it].name) == key(t.name) }
+            // lendários e especiais têm uma carta só: a cor não separa nada
+            if (com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name).size == 1) return same.firstOrNull() ?: -1
+            if (t.rarity == unknown) return same.firstOrNull { drivers[it].progress.cardsNeeded == t.cardsNeeded } ?: if (same.size == 1) same[0] else -1
+            return same.firstOrNull { drivers[it].rarity == t.rarity } ?: same.firstOrNull { drivers[it].rarity == unknown } ?: -1
+        }
         for (t in read.tiles.filter { read.screen == GameScreen.TEAM_DRIVERS }) {
-            val i = findDriver(t.name)
+            val i = findTile(t)
             if (i < 0) {
-                drivers += Driver(UUID.randomUUID().toString(), t.name, progress = Progress(t.level ?: 1, t.cardsOwned, t.cardsNeeded), featured = t.featured)
-                changes += "Novo piloto: ${t.name}"
+                drivers += Driver(UUID.randomUUID().toString(), t.name, rarity = t.rarity, progress = Progress(t.level ?: 1, t.cardsOwned, t.cardsNeeded), featured = t.featured)
+                changes += "Novo piloto: ${t.name}" + if (t.rarity != unknown) " (${t.rarity.label})" else ""
             } else {
                 val d = drivers[i]
                 drivers[i] = d.copy(
+                    rarity = if (t.rarity != unknown) t.rarity else d.rarity,
                     progress = d.progress.copy(level = t.level ?: d.progress.level, cardsOwned = t.cardsOwned, cardsNeeded = t.cardsNeeded),
                     featured = t.featured || d.featured,
                 )
@@ -106,10 +116,17 @@ object GameSync {
         if (read.driverPair.size == 2 && read.driverPair.all { it.first != null }) {
             val eq = read.driverPair.map { key(it.first!!) }.toSet()
             for (i in drivers.indices) if (drivers[i].equipped && key(drivers[i].name) !in eq) drivers[i] = drivers[i].copy(equipped = false)
+            for (i in drivers.indices) if (drivers[i].equipped) drivers[i] = drivers[i].copy(equipped = false)
             for ((name, stats) in read.driverPair) {
-                val i = findDriver(name!!)
-                if (i < 0) drivers += Driver(UUID.randomUUID().toString(), name, stats = stats, equipped = true)
-                else drivers[i] = drivers[i].copy(stats = stats, equipped = true)
+                // Os atributos exatos dizem qual carta (raridade + nível) está escalada.
+                val exact = com.leandro.f1clashcoach.core.model.Catalog.matchDriverStats(name!!, stats)
+                val rar = exact?.first?.rarity ?: unknown
+                val same = drivers.indices.filter { key(drivers[it].name) == key(name) }
+                val i = same.firstOrNull { rar != unknown && drivers[it].rarity == rar } ?: same.firstOrNull { drivers[it].rarity == unknown } ?: if (rar == unknown) same.firstOrNull() ?: -1 else -1
+                val lvl = exact?.second
+                if (i < 0) drivers += Driver(UUID.randomUUID().toString(), name, rarity = rar, stats = stats, equipped = true, progress = Progress(lvl ?: 1))
+                else drivers[i] = drivers[i].copy(stats = stats, equipped = true, rarity = if (rar != unknown) rar else drivers[i].rarity,
+                    progress = if (lvl != null) drivers[i].progress.copy(level = lvl) else drivers[i].progress)
             }
             changes += "Pilotos escalados: ${read.driverPair.joinToString { it.first!! }}"
         }
@@ -149,7 +166,8 @@ object GameSync {
         for (i in drivers.indices) if (!drivers[i].featured && isFeat(drivers[i].name)) drivers[i] = drivers[i].copy(featured = true)
         for (i in parts.indices) if (!parts[i].featured && isFeat(parts[i].name)) parts[i] = parts[i].copy(featured = true)
 
-        g = g.copy(parts = parts, drivers = drivers, updatedAt = now)
+        // Catálogo da temporada: nível pelas cartas, atributos e custo de cada nível.
+        g = com.leandro.f1clashcoach.core.model.Catalog.enrich(g.copy(parts = parts, drivers = drivers, updatedAt = now))
 
         // ---- Objetivos ----
         var objectives: List<Objective>? = null

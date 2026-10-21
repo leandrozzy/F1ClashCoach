@@ -1,5 +1,18 @@
 package com.leandro.f1clashcoach.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import com.leandro.f1clashcoach.core.model.Catalog
+import com.leandro.f1clashcoach.core.model.CollectionItem
+import com.leandro.f1clashcoach.core.model.PartSlot
+import com.leandro.f1clashcoach.core.model.Rarity
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,37 +61,77 @@ fun EvolveScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
     val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR")) }
 
     LazyColumn(modifier) {
+        // ---------- Fila de upgrades (gráfico de rendimento) ----------
         item {
-            SectionCard("Plano de upgrades") {
-                if (data.garage.parts.isEmpty() && data.garage.drivers.isEmpty()) {
-                    Text("Cadastre a garagem para ver o plano.", color = Warn, fontSize = 13.sp)
+            val ranked = plan.ranked.filter { it.gain > 0 && it.coins > 0 }.take(8)
+            val maxEff = ranked.maxOfOrNull { it.efficiency }?.takeIf { it > 0 } ?: 1.0
+            SectionCard("💰 Onde gastar as moedas") {
+                Text("Barra = quanto o upgrade rende por moeda. Verde = dá para fazer agora.", fontSize = 12.sp, color = Muted)
+                if (ranked.isEmpty()) Text("Abra Equipe › Pilotos e Carros no jogo com a leitura ligada: eu leio níveis e cartas e calculo com a base de todos os níveis.", fontSize = 13.sp, color = Warn)
+                ranked.forEach { a ->
+                    val now = a in plan.doNow
+                    val part = data.garage.parts.firstOrNull { it.id == a.itemId }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(rarityColor(part?.rarity ?: data.garage.drivers.firstOrNull { it.id == a.itemId }?.rarity ?: Rarity.UNKNOWN)), contentAlignment = Alignment.Center) {
+                            if (part != null) PartIcon(part.slot, Color.White, 24.dp) else HelmetIcon(Color.White, 24.dp)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(a.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.weight(1f))
+                                if (now) Pill("agora", Good) else if (!a.canUpgradeNow) Pill("cartas", Muted)
+                            }
+                            MiniBar((a.efficiency / maxEff).toFloat(), if (now) Good else Sky, Modifier.fillMaxWidth().padding(vertical = 3.dp))
+                            Text("nv ${a.level}→${a.level + 1} • +${"%.0f".format(a.gain)} atributos • ${formatK(a.coins.toLong())} moedas", fontSize = 11.sp, color = Muted)
+                        }
+                    }
                 }
-                if (plan.doNow.isNotEmpty()) {
-                    Text("Faça agora (cabe nas suas ${formatK(data.garage.coins)} moedas):", fontWeight = FontWeight.Bold, color = Good)
-                    plan.doNow.forEachIndexed { i, a -> Text("${i + 1}. ${a.name} (${a.kind}, nv ${a.level}) — ${a.reason}${if (a.gainIsEstimate) " ~" else ""}", fontSize = 13.sp) }
-                    Text("Sobram ${formatK(plan.coinsLeft)} moedas.", fontSize = 12.sp, color = Muted)
+                if (plan.doNow.isNotEmpty()) Text("Fazendo os verdes sobram ${formatK(plan.coinsLeft)} moedas.", fontSize = 12.sp, color = Good)
+                OutlinedButton(onClick = { vm.ask(CoachPrompts.EVOLUTION_PLAN, webSearch = true); goAi() }, modifier = Modifier.fillMaxWidth()) { Text("📈 Plano de 7 dias com IA") }
+            }
+        }
+
+        // ---------- Melhores cartas do jogo (rumo à S12) ----------
+        item {
+            val allDrivers = remember(data.garage) { Catalog.driverCollection(data.garage) }
+            val allParts = remember(data.garage) { Catalog.partCollection(data.garage) }
+            SectionCard("🎯 Melhores cartas para a Série 12") {
+                Text("As mais fortes no nível máximo. Coloridas = você tem; cinza = buscar em caixotes, loja e eventos.", fontSize = 12.sp, color = Muted)
+                SectionTitle("Pilotos")
+                allDrivers.sortedByDescending { it.maxTotal }.distinctBy { it.name }.take(6).chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
-                if (plan.collectCards.isNotEmpty()) {
-                    Text("Junte cartas destes (maior ganho):", fontWeight = FontWeight.Bold)
-                    plan.collectCards.forEach { a -> Text("• ${a.name} (${a.kind}) — ${a.reason}", fontSize = 13.sp) }
-                }
-                Text("~ = ganho estimado. Informe os atributos do próximo nível na peça para precisão total.", fontSize = 11.sp, color = Muted)
-                OutlinedButton(onClick = { vm.ask(CoachPrompts.EVOLUTION_PLAN, webSearch = true); goAi() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("📈 Plano de 7 dias com IA")
+                SectionTitle("Peças (a melhor de cada tipo)")
+                PartSlot.entries.mapNotNull { sl -> allParts.filter { it.slot == sl }.maxByOrNull { it.maxTotal } }.chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
             }
         }
+
+        // ---------- Desempenho ----------
         item {
-            SectionCard("Desempenho") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    Stat("Corridas", report.races.toString())
-                    Stat("Vitórias", "${(report.winRate * 100).toInt()}%")
-                    Stat("Últimas 20", "${(report.recentWinRate * 100).toInt()}%")
-                    Stat("Grid→Final", report.avgGrid?.let { g -> report.avgFinish?.let { f -> "%.1f→%.1f".format(g, f) } } ?: "—")
+            SectionCard("📊 Desempenho") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    WinDonut(report.wins, report.races - report.wins)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BigNumber("${report.races}", "corridas")
+                        BigNumber("${(report.recentWinRate * 100).toInt()}%", "últimas 20", if (report.recentWinRate >= 0.5) Good else Warn)
+                    }
                 }
-                if (report.bestTracks.isNotEmpty()) Text("Melhores: " + report.bestTracks.joinToString { "${it.track.name} ${(it.winRate * 100).toInt()}%" }, fontSize = 13.sp, color = Good)
-                if (report.worstTracks.isNotEmpty()) Text("Piores: " + report.worstTracks.joinToString { "${it.track.name} ${(it.winRate * 100).toInt()}%" }, fontSize = 13.sp, color = F1Red)
-                report.insights.forEach { Text("💡 $it", fontSize = 13.sp) }
+                report.byTrack.sortedByDescending { it.races }.take(8).forEach { t ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(t.track.name, fontSize = 12.sp, color = Color.White, modifier = Modifier.width(110.dp))
+                        MiniBar(t.winRate.toFloat(), if (t.winRate >= 0.5) Good else F1Red, Modifier.weight(1f))
+                        Text(" ${t.wins}/${t.races}", fontSize = 11.sp, color = Muted, modifier = Modifier.width(44.dp))
+                    }
+                }
+                report.insights.take(3).forEach { Text("💡 $it", fontSize = 12.sp) }
             }
         }
         item {

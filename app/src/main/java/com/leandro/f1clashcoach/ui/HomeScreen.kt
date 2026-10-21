@@ -144,6 +144,24 @@ fun HomeScreen(
             }
         }
 
+        // ---------- Minha equipe (cartas escaladas) ----------
+        item {
+            val eq = remember(data.garage) {
+                val d = com.leandro.f1clashcoach.core.model.Catalog.driverCollection(data.garage).filter { it.equipped }
+                val p = com.leandro.f1clashcoach.core.model.Catalog.partCollection(data.garage).filter { it.equipped }
+                (d + p)
+            }
+            SectionCard("🏎️ Minha equipe", action = { TextButton(onClick = { navigate(Tab.GARAGE) }) { Text("Garagem") } }) {
+                if (eq.isEmpty()) Text("Abra Equipe › Carros e Pilotos no jogo: suas cartas escaladas aparecem aqui.", fontSize = 12.sp, color = Muted)
+                eq.chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { androidx.compose.foundation.layout.Box(Modifier.weight(1f)) { AssetCard(it) { navigate(Tab.GARAGE) } } }
+                        repeat(3 - row.size) { androidx.compose.foundation.layout.Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+
         // ---------- Primeiros passos (some quando tudo estiver pronto) ----------
         if (!readingOn || !hasAi || !gameSeen) item {
             SectionCard("🚦 Comece por aqui") {
@@ -178,7 +196,7 @@ fun HomeScreen(
                     ActionRow(if (t.level == TipLevel.URGENT) "🔴" else if (t.level == TipLevel.IMPORTANT) "🟡" else "⚪", t.title, t.detail,
                         if (t.level == TipLevel.URGENT) F1Red else Warn)
                 }
-                live.events.take(4).forEach { Text("• $it", fontSize = 12.sp, color = Muted) }
+                live.events.take(2).forEach { Text("• $it", fontSize = 12.sp, color = Muted) }
                 Diag.lastError?.takeIf { System.currentTimeMillis() - Diag.lastErrorAt < 10 * 60_000 }?.let {
                     Text("⚠️ $it", fontSize = 12.sp, color = Warn)
                 }

@@ -4,13 +4,31 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.leandro.f1clashcoach.core.model.Catalog
+import com.leandro.f1clashcoach.core.model.CollectionItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -44,93 +62,218 @@ import com.leandro.f1clashcoach.core.model.Progress
 import com.leandro.f1clashcoach.core.model.Rarity
 import java.util.UUID
 
+private enum class Own(val label: String) { ALL("Todos"), MINE("Tenho"), MISSING("Não tenho"), READY("Evoluir já") }
+
 @Composable
 fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
     val data by vm.store.data.collectAsState()
     val g = data.garage
     var tab by remember { mutableIntStateOf(0) }
+    var own by remember { mutableStateOf(Own.ALL) }
+    var slotFilter by remember { mutableStateOf<PartSlot?>(null) }
+    var rarityFilter by remember { mutableStateOf<Rarity?>(null) }
+    var detail by remember { mutableStateOf<CollectionItem?>(null) }
     var editPart by remember { mutableStateOf<Part?>(null) }
     var editDriver by remember { mutableStateOf<Driver?>(null) }
     var editAccount by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { uris -> vm.scanScreenshots(uris) }
 
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().clickable { editAccount = true }.padding(12.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            Stat("Série", g.series.toString()); Stat("Troféus", g.trophies.toString())
-            Stat("Moedas", formatK(g.coins)); Stat("Bucks", formatK(g.bucks))
-        }
-        g.carTotals?.let { t ->
-            Text("Pontuação ${g.teamScore} • VEL ${t.speed} CUR ${t.cornering} PU ${t.powerUnit} QUA ${t.qualifying} PIT ${t.pitStop}s OVT ${t.overtakeMode}",
-                fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
-        }
-        Text("Com o Coach ligado, abra Equipe → Pilotos e Carros no jogo e role as listas: tudo é preenchido sozinho.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(horizontal = 12.dp))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) {
-                Text("📷 Ler prints", fontSize = 13.sp)
-            }
-            OutlinedButton(onClick = {
-                if (tab == 0) editPart = Part(UUID.randomUUID().toString(), PartSlot.ENGINE, "") else editDriver = Driver(UUID.randomUUID().toString(), "")
-            }, modifier = Modifier.weight(1f)) { Text(if (tab == 0) "+ Peça" else "+ Piloto", fontSize = 13.sp) }
-        }
-        TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Peças (${g.parts.size})") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Pilotos (${g.drivers.size})") })
-        }
-        LazyColumn {
-            if (tab == 0) {
-                if (g.parts.isEmpty()) item { EmptyHint() }
-                PartSlot.entries.forEach { slot ->
-                    val list = g.parts.filter { it.slot == slot }.sortedByDescending { it.stats.total }
-                    if (list.isNotEmpty()) {
-                        item { Text(slot.label, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 14.dp, top = 10.dp)) }
-                        items(list, key = { it.id }) { p -> PartRow(p) { editPart = p } }
+    val drivers = remember(g) { Catalog.driverCollection(g) }
+    val parts = remember(g) { Catalog.partCollection(g) }
+    val source = if (tab == 0) drivers else parts
+    val shown = source.filter { i ->
+        when (own) {
+            Own.ALL -> true
+            Own.MINE -> i.owned
+            Own.MISSING -> !i.owned
+            Own.READY -> i.owned && i.cardsNeeded > 0 && i.cardsOwned >= i.cardsNeeded && (i.level ?: 0) < i.maxLevel
+        } && (slotFilter == null || i.slot == slotFilter) && (rarityFilter == null || i.rarity == rarityFilter)
+    }.sortedWith(compareByDescending<CollectionItem> { it.equipped }.thenByDescending { it.owned }.thenBy { it.rarity.ordinal }.thenByDescending { it.total })
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3), modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ---- Resumo da equipe ----
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            HeroCard(Modifier.clickable { editAccount = true }) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Pontuação da equipe", fontSize = 12.sp, color = Muted)
+                            Text(if (g.teamScore > 0) g.teamScore.toString() else "—", fontSize = 30.sp, fontWeight = FontWeight.Black, color = Color.White)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("${drivers.count { it.owned }}/${drivers.size} pilotos", fontSize = 12.sp, color = Color.White)
+                            Text("${parts.count { it.owned }}/${parts.size} peças", fontSize = 12.sp, color = Color.White)
+                            Text("💰 ${formatK(g.coins)}", fontSize = 12.sp, color = Gold)
+                        }
+                    }
+                    g.carTotals?.let { t ->
+                        val mx = listOf(t.speed, t.cornering, t.powerUnit, t.qualifying, t.overtakeMode).max().coerceAtLeast(1).toFloat()
+                        listOf("Velocidade" to t.speed, "Curvas" to t.cornering, "Potência" to t.powerUnit, "Classificação" to t.qualifying, "Overtake" to t.overtakeMode).forEach { (l, v) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(l, fontSize = 11.sp, color = Muted, modifier = Modifier.width(92.dp))
+                                MiniBar(v / mx, Sky, Modifier.weight(1f))
+                                Text(" $v", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(36.dp))
+                            }
+                        }
+                        Text("Pit stop médio: ${t.pitStop}s", fontSize = 11.sp, color = Muted)
                     }
                 }
-            } else {
-                if (g.drivers.isEmpty()) item { EmptyHint() }
-                items(g.drivers.sortedByDescending { it.stats.total }, key = { it.id }) { d -> DriverRow(d) { editDriver = d } }
             }
-            item { Text(" ", Modifier.padding(20.dp)) }
+        }
+        // ---- Abas e filtros ----
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterPill("Pilotos", tab == 0, icon = { HelmetIcon(Color.White, 16.dp) }) { tab = 0; slotFilter = null }
+                    FilterPill("Peças", tab == 1, icon = { PartIcon(PartSlot.ENGINE, Color.White, 16.dp) }) { tab = 1; rarityFilter = null }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Own.entries.forEach { o -> FilterPill(o.label, own == o, Sky) { own = o } }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (tab == 1) {
+                        FilterPill("Todas", slotFilter == null, Sky) { slotFilter = null }
+                        PartSlot.entries.forEach { sl -> FilterPill(sl.label, slotFilter == sl, Sky, icon = { PartIcon(sl, Color.White, 16.dp) }) { slotFilter = if (slotFilter == sl) null else sl } }
+                    } else {
+                        listOf(Rarity.COMMON, Rarity.RARE, Rarity.EPIC, Rarity.LEGENDARY).forEach { r ->
+                            FilterPill(r.label, rarityFilter == r, rarityColor(r)) { rarityFilter = if (rarityFilter == r) null else r }
+                        }
+                    }
+                }
+                Legend(listOf("Comum" to rarityColor(Rarity.COMMON), "Rara" to rarityColor(Rarity.RARE), "Épica" to rarityColor(Rarity.EPIC), "Lendária" to rarityColor(Rarity.LEGENDARY)))
+                if (source.none { it.owned }) Text("Abra Equipe › Pilotos e Carros no jogo com a leitura ligada e role a lista: suas cartas aparecem aqui coloridas. As cinzas são as que você ainda não tem.",
+                    fontSize = 12.sp, color = Warn)
+            }
+        }
+        items(shown, key = { it.name + it.rarity.name + (it.slot?.name ?: "") }) { item -> AssetCard(item) { detail = item } }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) { Text("📷 Ler prints", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { if (tab == 1) editPart = Part(UUID.randomUUID().toString(), PartSlot.ENGINE, "") else editDriver = Driver(UUID.randomUUID().toString(), "") }, modifier = Modifier.weight(1f)) {
+                        Text(if (tab == 1) "+ Peça manual" else "+ Piloto manual", fontSize = 12.sp)
+                    }
+                }
+                Text("Dados de todos os níveis: catálogo da comunidade, temporada ${Catalog.season}.", fontSize = 10.sp, color = Muted)
+            }
         }
     }
 
+    detail?.let { it0 ->
+        AssetDetailDialog(it0, onDismiss = { detail = null }, onEdit = {
+            if (it0.isDriver) editDriver = g.drivers.firstOrNull { d -> d.name == it0.gameName && (d.rarity == it0.rarity || d.rarity == Rarity.UNKNOWN) }
+            else editPart = g.parts.firstOrNull { p -> p.name == it0.gameName }
+            detail = null
+        })
+    }
     editPart?.let { p -> PartDialog(p, onDismiss = { editPart = null }, onSave = { vm.store.upsertPart(it); editPart = null }, onDelete = { vm.store.removePart(p.id); editPart = null }) }
     editDriver?.let { d -> DriverDialog(d, onDismiss = { editDriver = null }, onSave = { vm.store.upsertDriver(it); editDriver = null }, onDelete = { vm.store.removeDriver(d.id); editDriver = null }) }
     if (editAccount) AccountDialog(g, onDismiss = { editAccount = false }) { ng -> vm.store.update { it.copy(garage = ng) }; editAccount = false }
 }
 
+/** Detalhe de uma carta: atributos (atual, próximo nível e máximo), gráfico por nível e custos. */
 @Composable
-private fun EmptyHint() {
-    Text(
-        "Vazio. Jeito mais rápido: ligue o Coach (Início) e abra cada peça/piloto no jogo — eu leio a tela e preencho. " +
-            "Ou tire prints dessas telas e toque em \"Ler prints\".",
-        fontSize = 13.sp, color = Muted, modifier = Modifier.padding(16.dp),
+private fun AssetDetailDialog(item: CollectionItem, onDismiss: () -> Unit, onEdit: () -> Unit) {
+    val c = rarityColor(item.rarity)
+    val lvl = item.level ?: 1
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(c, c.copy(alpha = 0.5f)))), contentAlignment = Alignment.Center) {
+                    if (item.isDriver) HelmetIcon(Color.White, 36.dp, c.compositeDark()) else PartIcon(item.slot ?: PartSlot.ENGINE, Color.White, 36.dp, c.compositeDark())
+                }
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(item.gameName ?: item.name, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.White)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Pill(item.rarity.label, c)
+                        item.slot?.let { Pill(it.label, Sky) }
+                        Pill(if (item.owned) "Nv $lvl/${item.maxLevel}" else "Série ${item.series}", if (item.owned) Good else Muted)
+                    }
+                }
+            }
+        },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                if (item.isDriver) {
+                    val def = Catalog.findDrivers(item.name).firstOrNull { it.rarity == item.rarity }
+                    if (def != null) {
+                        val lv = lvl.coerceIn(1, def.maxLevel)
+                        val cur = def.at(lv)!!; val nx = def.at(lv + 1); val mx = def.levels.last()
+                        listOf(
+                            Triple("Ultrapassagem", cur.overtaking to nx?.overtaking, mx.overtaking),
+                            Triple("Defesa", cur.defending to nx?.defending, mx.defending),
+                            Triple("Classificação", cur.qualifying to nx?.qualifying, mx.qualifying),
+                            Triple("Largada", cur.raceStart to nx?.raceStart, mx.raceStart),
+                            Triple("Pneus", cur.tyreManagement to nx?.tyreManagement, mx.tyreManagement),
+                        ).forEach { (l, v, m) ->
+                            StatBar(l, v.first.toFloat(), if (item.owned) v.second?.toFloat() else null, m.toFloat(), 100f, c, v.first.toString(),
+                                if (item.owned) v.second?.let { n -> "+${n - v.first}" } else null)
+                        }
+                        SectionTitle("Total por nível")
+                        LevelChart(def.levels.map { it.total }, if (item.owned) lvl else null, c)
+                        CostLines(item, if (item.owned) def.cards.getOrNull(lvl) else null)
+                    }
+                } else {
+                    val def = Catalog.findPart(item.name)
+                    if (def != null) {
+                        val lv = lvl.coerceIn(1, def.maxLevel)
+                        val cur = def.at(lv)!!; val nx = def.at(lv + 1); val mx = def.levels.last()
+                        val scale = def.levels.flatMap { listOf(it.speed, it.cornering, it.powerUnit, it.qualifying, it.overtakeMode) }.max().coerceAtLeast(10).toFloat() * 1.1f
+                        listOf(
+                            Triple("Velocidade", cur.speed to nx?.speed, mx.speed),
+                            Triple("Curvas", cur.cornering to nx?.cornering, mx.cornering),
+                            Triple("Unidade de potência", cur.powerUnit to nx?.powerUnit, mx.powerUnit),
+                            Triple("Classificação", cur.qualifying to nx?.qualifying, mx.qualifying),
+                            Triple("Overtake", cur.overtakeMode to nx?.overtakeMode, mx.overtakeMode),
+                        ).filter { it.third > 0 }.forEach { (l, v, m) ->
+                            StatBar(l, v.first.toFloat(), if (item.owned) v.second?.toFloat() else null, m.toFloat(), scale, c, v.first.toString(),
+                                if (item.owned) v.second?.let { n -> "+${n - v.first}" } else null)
+                        }
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text("Pit stop", fontSize = 12.sp, color = Muted, modifier = Modifier.weight(1f))
+                            Text("${cur.pitStop}s" + (nx?.let { if (item.owned) "  → ${it.pitStop}s" else "" } ?: ""), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        SectionTitle("Total por nível")
+                        LevelChart(def.levels.map { it.total }, if (item.owned) lvl else null, c)
+                        CostLines(item, if (item.owned) Catalog.cardSteps.getOrNull(lvl - 1) else null)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        dismissButton = { if (item.owned) TextButton(onClick = onEdit) { Text("Corrigir") } },
     )
 }
 
 @Composable
-private fun PartRow(p: Part, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text((if (p.equipped) "✅ " else "") + p.name + (if (p.featured) " ⭐" else ""), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text("Nv ${p.progress.level} • ${p.rarity.label}", fontSize = 12.sp, color = Muted)
+private fun CostLines(item: CollectionItem, cardsNext: Int?) {
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(PanelHi).padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!item.owned) {
+            Text("🔒 Você ainda não tem esta carta", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+            Text("Aparece a partir da Série ${item.series} (caixotes, loja e eventos).", fontSize = 12.sp, color = Muted)
+            Text("No máximo: total ${item.maxTotal}", fontSize = 12.sp, color = Muted)
+        } else if ((item.level ?: 0) >= item.maxLevel) {
+            Text("🏆 Nível máximo", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Gold)
+        } else {
+            Text("Próximo nível", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                BigNumber("${cardsNext ?: item.cardsNeeded}", "cartas", Sky, Modifier.weight(1f))
+                BigNumber(item.nextCoins?.let { formatK(it) } ?: "?", "moedas", Gold, Modifier.weight(1f))
+                BigNumber(item.nextTotal?.let { "+${it - item.total}" } ?: "?", "atributos", Good, Modifier.weight(1f))
+            }
+            item.coinsToMax?.let { Text("Até o nível ${item.maxLevel}: ${formatK(it)} moedas • total ${item.maxTotal}", fontSize = 12.sp, color = Muted) }
+            if (item.cardsNeeded > 0) {
+                ProgressLine(item.cardsOwned.toFloat() / item.cardsNeeded, if (item.cardsOwned >= item.cardsNeeded) Good else Sky)
+                Text("${item.cardsOwned}/${item.cardsNeeded} cartas" + if (item.cardsOwned >= item.cardsNeeded) " • pode evoluir agora" else " • faltam ${item.cardsNeeded - item.cardsOwned}",
+                    fontSize = 12.sp, color = if (item.cardsOwned >= item.cardsNeeded) Good else Muted)
+            }
         }
-        val s = p.stats
-        if (s.total > 0) Text("VEL ${s.speed}  CUR ${s.cornering}  PU ${s.powerUnit}  QUA ${s.qualifying}  PIT ${s.pitStop}s  OVT ${s.overtakeMode}", fontSize = 12.sp)
-        CardsBar(p.progress)
-    }
-}
-
-@Composable
-private fun DriverRow(d: Driver, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text((if (d.equipped) "✅ " else "") + d.name + (if (d.legendary) " 👑" else "") + (if (d.featured) " ⭐" else ""), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text("Nv ${d.progress.level} • ${d.rarity.label}", fontSize = 12.sp, color = Muted)
-        }
-        val s = d.stats
-        if (s.total > 0) Text("ULT ${s.overtaking}  DEF ${s.defending}  QUA ${s.qualifying}  LAR ${s.raceStart}  PNEU ${s.tyreManagement}", fontSize = 12.sp)
-        CardsBar(d.progress)
     }
 }
 

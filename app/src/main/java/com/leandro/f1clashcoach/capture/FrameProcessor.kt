@@ -83,7 +83,7 @@ class FrameProcessor(
             Diag.lastScreenAt = System.currentTimeMillis()
         }
         try {
-            handle(parsed)
+            handle(withRarity(parsed, bitmap))
         } catch (e: Exception) {
             Diag.error("Tela ${parsed.screen.label}: " + (e.message ?: e.javaClass.simpleName))
         }
@@ -92,6 +92,21 @@ class FrameProcessor(
     }
 
     fun close() { runCatching { ocr.close() } }
+
+    /** Cartas de piloto: a cor do fundo diz a raridade (azul comum, laranja rara, roxo épica). */
+    private fun withRarity(p: ParsedScreen, bmp: Bitmap): ParsedScreen {
+        val g = p.game ?: return p
+        if (p.screen != GameScreen.TEAM_DRIVERS || g.tiles.isEmpty()) return p
+        val w = bmp.width; val h = bmp.height
+        val tiles = g.tiles.map { t ->
+            val px = com.leandro.f1clashcoach.core.model.RarityColors.offsets.mapNotNull { (dx, dy) ->
+                val x = ((t.nameLeft + dx) * w).toInt(); val y = ((t.nameTop + dy) * h).toInt()
+                if (x in 0 until w && y in 0 until h) bmp.getPixel(x, y).let { c -> Triple((c shr 16) and 0xff, (c shr 8) and 0xff, c and 0xff) } else null
+            }
+            t.copy(rarity = com.leandro.f1clashcoach.core.model.RarityColors.classify(px))
+        }
+        return p.copy(game = g.copy(tiles = tiles))
+    }
 
     private fun handle(p: ParsedScreen) {
         val data = app.store.data.value

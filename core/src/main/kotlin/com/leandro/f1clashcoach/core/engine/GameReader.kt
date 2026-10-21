@@ -104,6 +104,11 @@ data class GridTile(
     val cardsNeeded: Int,
     val slot: PartSlot?,
     val featured: Boolean,
+    /** Canto superior esquerdo do nome (fração da tela): o app amostra a cor da carta a partir daqui. */
+    val nameLeft: Float = 0f,
+    val nameTop: Float = 0f,
+    /** Raridade pela cor da carta (preenchida pelo app, que tem a imagem). */
+    val rarity: com.leandro.f1clashcoach.core.model.Rarity = com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN,
 ) {
     val canUpgrade: Boolean get() = cardsNeeded > 0 && cardsOwned >= cardsNeeded
 }
@@ -409,10 +414,10 @@ object GameReader {
                 Regex("""\d{1,2}\s?%""").containsMatchIn(f.t.text) && f.cx >= name.t.left - 0.01f && f.cx <= name.t.left + 0.22f &&
                     f.cy <= name.cy + 0.005f && name.cy - f.cy < 0.04f
             }
-            result += name to GridTile(name.t.text.trim(), level, owned, need, slot, featured)
+            result += name to GridTile(name.t.text.trim(), level, owned, need, slot, featured, name.t.left, name.t.top)
         }
         // Ordem de leitura: linha a linha (tolerando pequenas diferenças de altura), da esquerda para a direita.
-        return result.sortedWith(compareBy({ (it.first.cy / 0.03f).toInt() }, { it.first.cx })).map { it.second }.distinctBy { it.name }
+        return result.sortedWith(compareBy({ (it.first.cy / 0.03f).toInt() }, { it.first.cx })).map { it.second }.distinctBy { it.name + "@" + (it.nameTop / 0.03f).toInt() + "," + (it.nameLeft / 0.1f).toInt() }
     }
 
     private fun readObjectives(ls: List<L>, base: GameRead): GameRead {
