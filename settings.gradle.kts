@@ -15,4 +15,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "F1ClashCoach"
+include(":core")
 include(":app")

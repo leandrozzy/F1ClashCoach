@@ -1,2 +1,5 @@
-# ML Kit and Jsoup are supported by R8. Keep model classes whose names can appear in logs/debug export.
--keep class com.leandro.f1clashcoach.model.** { *; }
+# Minificação está desligada; regras mantidas para quando for ativada.
+-keep class com.leandro.f1clashcoach.core.model.** { *; }
+-dontwarn java.beans.**
+-dontwarn org.slf4j.**
+-dontwarn com.google.errorprone.annotations.**

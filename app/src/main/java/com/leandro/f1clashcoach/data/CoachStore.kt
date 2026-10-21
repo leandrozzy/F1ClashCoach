@@ -1,0 +1,124 @@
+package com.leandro.f1clashcoach.data
+
+import android.content.Context
+import com.leandro.f1clashcoach.core.ai.ChatTurn
+import com.leandro.f1clashcoach.core.model.CarStats
+import com.leandro.f1clashcoach.core.model.Driver
+import com.leandro.f1clashcoach.core.model.DriverStats
+import com.leandro.f1clashcoach.core.model.Garage
+import com.leandro.f1clashcoach.core.model.Part
+import com.leandro.f1clashcoach.core.model.PartSlot
+import com.leandro.f1clashcoach.core.model.Progress
+import com.leandro.f1clashcoach.core.model.RaceRecord
+import com.leandro.f1clashcoach.core.model.TyreObservation
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.UUID
+
+@Serializable
+data class ChatMessage(val fromUser: Boolean, val text: String, val sources: List<String> = emptyList(), val time: Long = System.currentTimeMillis()) {
+    fun toTurn() = ChatTurn(fromUser, text)
+}
+
+@Serializable
+data class DailyCheck(val day: String = "", val done: Set<String> = emptySet())
+
+@Serializable
+data class CoachData(
+    val garage: Garage = Garage(),
+    val races: List<RaceRecord> = emptyList(),
+    val tyreObservations: List<TyreObservation> = emptyList(),
+    val chat: List<ChatMessage> = emptyList(),
+    val daily: DailyCheck = DailyCheck(),
+    val lastMeta: String = "",
+    val lastMetaTime: Long = 0,
+)
+
+/** Tudo que o Coach sabe fica neste arquivo JSON, no próprio aparelho. */
+class CoachStore(context: Context) {
+    private val file = File(context.filesDir, "coach-data.json")
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false }
+    private val _data = MutableStateFlow(load())
+    val data: StateFlow<CoachData> = _data
+
+    private fun load(): CoachData = runCatching {
+        if (file.exists()) json.decodeFromString(CoachData.serializer(), file.readText()) else CoachData()
+    }.getOrElse { CoachData() }
+
+    @Synchronized
+    fun update(transform: (CoachData) -> CoachData) {
+        val next = transform(_data.value)
+        _data.value = next
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(json.encodeToString(CoachData.serializer(), next))
+        tmp.renameTo(file)
+    }
+
+    fun exportJson(): String = json.encodeToString(CoachData.serializer(), _data.value)
+
+    fun importJson(text: String) {
+        val parsed = json.decodeFromString(CoachData.serializer(), text)
+        update { parsed }
+    }
+
+    // ---------- Garagem ----------
+    fun upsertPart(p: Part) = update { d ->
+        val list = d.garage.parts.filterNot { it.id == p.id }.let { rest ->
+            if (p.equipped) rest.map { if (it.slot == p.slot) it.copy(equipped = false) else it } else rest
+        }
+        d.copy(garage = d.garage.copy(parts = list + p))
+    }
+
+    fun removePart(id: String) = update { d -> d.copy(garage = d.garage.copy(parts = d.garage.parts.filterNot { it.id == id })) }
+
+    fun upsertDriver(dr: Driver) = update { d ->
+        var list = d.garage.drivers.filterNot { it.id == dr.id }
+        if (dr.equipped && list.count { it.equipped } >= 2) {
+            // Só dois pilotos escalados: tira o mais fraco.
+            val weakest = list.filter { it.equipped }.minByOrNull { it.stats.total }
+            list = list.map { if (it.id == weakest?.id) it.copy(equipped = false) else it }
+        }
+        d.copy(garage = d.garage.copy(drivers = list + dr))
+    }
+
+    fun removeDriver(id: String) = update { d -> d.copy(garage = d.garage.copy(drivers = d.garage.drivers.filterNot { it.id == id })) }
+
+    /** Atualização vinda do OCR: casa pelo nome (e slot) e preserva o que não foi lido. */
+    fun mergeScannedPart(name: String, slot: PartSlot, stats: CarStats, level: Int?, cards: Pair<Int, Int>?): Boolean {
+        val g = _data.value.garage
+        val existing = g.parts.firstOrNull { it.slot == slot && it.name.equals(name, ignoreCase = true) }
+        val progress = (existing?.progress ?: Progress()).let { p ->
+            p.copy(level = level ?: p.level, cardsOwned = cards?.first ?: p.cardsOwned, cardsNeeded = cards?.second ?: p.cardsNeeded)
+        }
+        val part = existing?.copy(stats = stats, progress = progress)
+            ?: Part(UUID.randomUUID().toString(), slot, name, stats = stats, progress = progress)
+        if (existing == part) return false
+        upsertPart(part)
+        return true
+    }
+
+    fun mergeScannedDriver(name: String, stats: DriverStats, level: Int?, cards: Pair<Int, Int>?): Boolean {
+        val g = _data.value.garage
+        val existing = g.drivers.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        val progress = (existing?.progress ?: Progress()).let { p ->
+            p.copy(level = level ?: p.level, cardsOwned = cards?.first ?: p.cardsOwned, cardsNeeded = cards?.second ?: p.cardsNeeded)
+        }
+        val driver = existing?.copy(stats = stats, progress = progress)
+            ?: Driver(UUID.randomUUID().toString(), name, stats = stats, progress = progress)
+        if (existing == driver) return false
+        upsertDriver(driver)
+        return true
+    }
+
+    // ---------- Corridas ----------
+    fun addRace(r: RaceRecord) = update { d -> d.copy(races = (d.races + r).takeLast(2000)) }
+    fun removeRace(id: String) = update { d -> d.copy(races = d.races.filterNot { it.id == id }) }
+    fun addTyreObservation(o: TyreObservation) = update { d -> d.copy(tyreObservations = (d.tyreObservations + o).takeLast(3000)) }
+
+    // ---------- Chat ----------
+    fun addChat(m: ChatMessage) = update { d -> d.copy(chat = (d.chat + m).takeLast(200)) }
+    fun clearChat() = update { it.copy(chat = emptyList()) }
+}
