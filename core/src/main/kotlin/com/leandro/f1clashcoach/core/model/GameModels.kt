@@ -99,6 +99,8 @@ data class Driver(
     val equipped: Boolean = false,
     val featured: Boolean = false,
     val minTier: String? = null,
+    /** Coleção da edição especial (só para raridade SPECIAL). */
+    val edition: String = "",
 ) {
     /** Lendário = não está no grid atual (alguns GPs proíbem lendários). */
     val legendary: Boolean get() = !CurrentGrid.isCurrent(name)

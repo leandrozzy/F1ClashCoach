@@ -27,7 +27,9 @@ object Txt {
             var err = 0
             var j = 0
             while (j < kw.length && err <= maxErr) {
-                if (line[i + j] != kw[j]) err++
+                val a = line[i + j]; val b = kw[j]
+                // a fonte do jogo faz o OCR trocar "a" por "z": não conta como erro
+                if (a != b && !((a == 'Z' && b == 'A') || (a == 'A' && b == 'Z'))) err++
                 j++
             }
             if (err <= maxErr) return true
@@ -107,6 +109,8 @@ data class GridTile(
     /** Canto superior esquerdo do nome (fração da tela): o app amostra a cor da carta a partir daqui. */
     val nameLeft: Float = 0f,
     val nameTop: Float = 0f,
+    /** Edição especial (aba Edições Especiais), ex.: "Escolhas do Paddock". */
+    val edition: String? = null,
     /** Raridade pela cor da carta (preenchida pelo app, que tem a imagem). */
     val rarity: com.leandro.f1clashcoach.core.model.Rarity = com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN,
 ) {
@@ -386,7 +390,23 @@ object GameReader {
             val n2 = names.lastOrNull { it.cx >= 0.5f }?.t?.text?.trim()
             pair = listOf(n1 to DriverStats(a[0], a[1], a[2], a[3], a[4]), n2 to DriverStats(b[0], b[1], b[2], b[3], b[4]))
         }
-        return base.copy(driverPair = pair, tiles = tiles(ls, isPart = false, lastSlot = null))
+        var tl = tiles(ls, isPart = false, lastSlot = null)
+        // Aba Edições Especiais: cartas com as cores das equipes, separadas por coleção ("Escolhas do Paddock", "...: Turbo").
+        val sections = ls.filter { Txt.has(it.c, "ESCOLHASDOPADDOCK") }
+        if (sections.isNotEmpty()) {
+            tl = tl.map { t ->
+                val sec = sections.filter { it.t.top < t.nameTop }.maxByOrNull { it.t.top }
+                val ed = sec?.t?.text?.trim()?.let { s -> if (Txt.has(Txt.compact(s), "TURBO")) "Escolhas do Paddock: Turbo" else if (Txt.has(Txt.compact(s), "ESCOLHASDOPADDOCK")) "Escolhas do Paddock" else s.lowercase().replaceFirstChar { c -> c.uppercase() } }
+                t.copy(rarity = com.leandro.f1clashcoach.core.model.Rarity.SPECIAL, edition = ed ?: "Edição especial")
+            }
+        } else {
+            // Aba Pilotos Lendários: nomes que só existem como lendários.
+            tl = tl.map { t ->
+                val defs = com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name)
+                if (defs.isNotEmpty() && defs.all { it.rarity == com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY }) t.copy(rarity = com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY) else t
+            }
+        }
+        return base.copy(driverPair = pair, tiles = tl)
     }
 
     /** Pareia nomes com a linha "nível cartas/necessárias" logo abaixo. */

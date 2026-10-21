@@ -41,6 +41,7 @@ data class CollectionItem(
     val featured: Boolean,
     val equipped: Boolean,
     val gameName: String?,
+    val edition: String = "",
 )
 
 /**
@@ -82,7 +83,8 @@ object Catalog {
 
     // ---------------------------------------------------------------- nomes
 
-    private fun key(s: String) = Txt.compact(s).replace("0", "O")
+    /** Chave de nome: sem acento/pontos; "z" e "a" iguais (o OCR troca na fonte do jogo). */
+    private fun key(s: String) = Txt.compact(s).replace("0", "O").replace('Z', 'A').replace('I', 'L')
 
     /** "F. Colapinto" (jogo) casa com "Colapinto" (catálogo); "D. Hill" com "D.Hill". */
     fun sameName(game: String, cat: String): Boolean {
@@ -91,7 +93,15 @@ object Catalog {
         if (g == c) return true
         val short = if (g.length < c.length) g else c
         val long = if (g.length < c.length) c else g
-        return short.length >= 4 && long.endsWith(short) && long.length - short.length <= 3
+        if (short.length >= 4 && long.endsWith(short) && long.length - short.length <= 3) return true
+        // 1 letra errada (2 em nomes longos), comparando o fim do nome do jogo com o do catálogo
+        if (short.length >= 6 && long.length - short.length <= 3) {
+            val tail = long.takeLast(short.length)
+            // mesmo tamanho = os dois têm (ou não têm) inicial: a inicial tem que bater (D. Hill ≠ G. Hill)
+            if (long.length == short.length && long[0] != short[0]) return false
+            if (Txt.lev(tail, short, 2) <= (if (short.length >= 8) 2 else 1)) return true
+        }
+        return false
     }
 
     fun findPart(name: String): PartDef? = parts.firstOrNull { sameName(name, it.name) }
@@ -121,8 +131,16 @@ object Catalog {
     /** Raridade e nível exatos pelos atributos lidos (tabela dos pilotos escalados). */
     fun matchDriverStats(name: String, stats: DriverStats): Pair<DriverDef, Int>? {
         if (stats.total == 0) return null
-        for (d in findDrivers(name)) d.levels.forEachIndexed { i, s -> if (s == stats) return d to i + 1 }
-        return null
+        val got = listOf(stats.overtaking, stats.defending, stats.qualifying, stats.raceStart, stats.tyreManagement)
+        var best: Pair<DriverDef, Int>? = null; var bestErr = Int.MAX_VALUE
+        for (d in findDrivers(name)) d.levels.forEachIndexed { i, s ->
+            val want = listOf(s.overtaking, s.defending, s.qualifying, s.raceStart, s.tyreManagement)
+            // valores lidos como 0 (linha não lida) não contam; tolera 1 número lido errado
+            val err = got.indices.count { got[it] != 0 && got[it] != want[it] }
+            val read = got.count { it != 0 }
+            if (read >= 3 && err <= 1 && err < bestErr) { best = d to i + 1; bestErr = err }
+        }
+        return best
     }
 
     // ---------------------------------------------------------------- preencher a garagem
@@ -141,6 +159,7 @@ object Catalog {
             )
         }
         val drivers = g.drivers.map { d ->
+            if (d.rarity == Rarity.SPECIAL) return@map d
             val exact = matchDriverStats(d.name, d.stats)
             val def = exact?.first ?: findDriver(d.name, d.rarity) ?: return@map d
             val lvl = exact?.second ?: levelFromCardsNeeded(d.progress.cardsNeeded)?.takeIf { d.progress.level <= 1 || it == d.progress.level } ?: d.progress.level
@@ -167,6 +186,14 @@ object Catalog {
             mine?.progress?.cardsOwned ?: 0, mine?.progress?.cardsNeeded ?: 0,
             lvl?.let { driverCoinsToNext(def, it) } ?: def.coins.getOrNull(1), lvl?.let { driverCoinsToMax(def, it) },
             mine?.featured == true, mine?.equipped == true, mine?.name,
+        )
+    } + g.drivers.filter { it.rarity == Rarity.SPECIAL }.map { d ->
+        // Edições especiais: fora do catálogo; mostra o que foi lido do jogo.
+        CollectionItem(
+            d.name, true, Rarity.SPECIAL, null, 0, true, d.progress.level, maxOf(d.progress.level, 7),
+            d.stats.total, d.nextLevelStats?.total, d.stats.total,
+            d.progress.cardsOwned, d.progress.cardsNeeded, d.progress.upgradeCoins.toLong().takeIf { it > 0 }, null,
+            d.featured, d.equipped, d.name, edition = d.edition,
         )
     }
 

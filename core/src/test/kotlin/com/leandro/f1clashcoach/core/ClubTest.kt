@@ -75,9 +75,13 @@ class ClubTest {
     @Test fun duelOddsAndPlaybook() {
         val s12 = SeriesCatalog.defaults.last()
         val fav = DuelOddsCalc.estimate(1500, 1380, emptyList(), s12)
-        assertTrue(fav.winPct >= 75)
-        assertNotNull(fav.expectedFlags)
-        assertTrue(DuelOddsCalc.estimate(1300, 1450, emptyList(), s12).winPct < 25)
+        assertEquals("Favorito", fav.verdict)
+        assertTrue(!fav.confident && fav.expectedFlags == null)
+        assertTrue(fav.headline.contains("sem histórico"))
+        val hist = (1..10).map { RaceRecord("h$it", it.toLong(), "monza", won = it <= 7, myScore = 1500, rivalScore = 1390) }
+        val real = DuelOddsCalc.estimate(1500, 1380, hist, s12)
+        assertTrue(real.confident); assertEquals(70, real.winPct); assertNotNull(real.expectedFlags)
+        assertEquals("Muito difícil", DuelOddsCalc.estimate(1300, 1450, emptyList(), s12).verdict)
         val races = (1..4).map { RaceRecord("$it", it.toLong(), "monza", won = it != 4, strategy = "M→H") } +
             (5..6).map { RaceRecord("$it", it.toLong(), "monza", won = false, strategy = "S→M") }
         val play = TrackPlaybook.forTrack(races, "monza")!!

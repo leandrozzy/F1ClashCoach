@@ -12,44 +12,50 @@ import kotlin.math.roundToInt
 // ---------------------------------------------------------------- chance de vitória no duelo
 
 data class DuelOdds(
+    /** % de vitória — só confiável quando [sample] >= 8. */
     val winPct: Int,
-    /** Bandeiras esperadas nesta corrida (ganho x perda). */
     val expectedFlags: Double?,
     val verdict: String,
     val tips: List<String>,
-)
+    /** Corridas suas com diferença de pontuação parecida usadas na conta. */
+    val sample: Int = 0,
+    val diff: Int = 0,
+) {
+    val confident: Boolean get() = sample >= 8
+    /** Texto honesto: número só com histórico suficiente. */
+    val headline: String get() = if (confident) "$winPct% de vitória (em $sample corridas suas parecidas)"
+        else "$verdict • diferença ${if (diff >= 0) "+" else ""}$diff" + if (sample > 0) " ($sample corridas parecidas até agora)" else " (ainda sem histórico)"
+}
 
 object DuelOddsCalc {
-    /** Curva base: ~±100 de pontuação ≈ 78/22. Ajustada pelo seu histórico com rivais parecidos. */
+    /**
+     * Com histórico: % real das suas corridas com diferença de pontuação parecida (±40).
+     * Sem histórico: só a leitura da diferença (favorito / equilibrado / azarão), sem inventar número.
+     */
     fun estimate(myScore: Int, rivalScore: Int, races: List<RaceRecord>, series: SeriesInfo?): DuelOdds {
         val diff = myScore - rivalScore
         val base = 1.0 / (1.0 + exp(-diff / 80.0))
         val similar = races.filter { it.won != null && it.myScore != null && it.rivalScore != null && kotlin.math.abs((it.myScore - it.rivalScore) - diff) <= 40 }
-        val p = if (similar.size >= 5) {
-            val hist = similar.count { it.won == true }.toDouble() / similar.size
-            val w = (similar.size / 20.0).coerceAtMost(0.6)
-            base * (1 - w) + hist * w
-        } else base
+        val p = if (similar.size >= 8) similar.count { it.won == true }.toDouble() / similar.size else base
         val win = series?.winFlags
         val loss = series?.lossFlags ?: win
-        val exp = if (win != null && loss != null) p * win - (1 - p) * loss else null
-        val pct = (p * 100).roundToInt().coerceIn(3, 97)
+        val exp = if (similar.size >= 8 && win != null && loss != null) p * win - (1 - p) * loss else null
+        val pct = (p * 100).roundToInt().coerceIn(1, 99)
         val verdict = when {
-            pct >= 70 -> "Favorito"
-            pct >= 45 -> "Equilibrado"
-            pct >= 25 -> "Azarão"
+            diff >= 60 -> "Favorito"
+            diff >= -20 -> "Equilibrado"
+            diff >= -80 -> "Azarão"
             else -> "Muito difícil"
         }
         val tips = when {
-            pct >= 70 -> listOf("Plano padrão, sem arriscar: largue bem e controle o desgaste.", "Guarde o Overtake para defender se o rival acelerar.")
-            pct >= 45 -> listOf("Classificação e pit decidem: use o pneu mais rápido na largada.", "Pare 1 volta antes do rival para ganhar posição (undercut).")
+            diff >= 60 -> listOf("Plano padrão, sem arriscar: largue bem e controle o desgaste.", "Guarde o Overtake para defender se o rival acelerar.")
+            diff >= -20 -> listOf("Classificação e pit decidem: use o pneu mais rápido na largada.", "Pare 1 volta antes do rival para ganhar posição (undercut).")
             else -> listOf(
                 "Arrisque na estratégia: uma parada a menos ou pneu diferente do rival.",
-                "Use o Overtake cedo e torça por chuva/safety car: só a estratégia vira esse duelo.",
-                "Se perder vários seguidos assim, evolua antes de continuar (perde bandeiras).",
+                "Use o Overtake cedo; chuva ou erro do rival viram esse duelo.",
             )
         }
-        return DuelOdds(pct, exp, verdict, tips)
+        return DuelOdds(pct, exp, verdict, tips, similar.size, diff)
     }
 }
 

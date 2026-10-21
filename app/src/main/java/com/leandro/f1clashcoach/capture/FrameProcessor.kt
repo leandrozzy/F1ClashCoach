@@ -103,7 +103,7 @@ class FrameProcessor(
                 val x = ((t.nameLeft + dx) * w).toInt(); val y = ((t.nameTop + dy) * h).toInt()
                 if (x in 0 until w && y in 0 until h) bmp.getPixel(x, y).let { c -> Triple((c shr 16) and 0xff, (c shr 8) and 0xff, c and 0xff) } else null
             }
-            t.copy(rarity = com.leandro.f1clashcoach.core.model.RarityColors.classify(px))
+            if (t.rarity != com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN) t else t.copy(rarity = com.leandro.f1clashcoach.core.model.RarityColors.classify(px))
         }
         return p.copy(game = g.copy(tiles = tiles))
     }
@@ -112,7 +112,8 @@ class FrameProcessor(
         val data = app.store.data.value
         val settings = app.settings.state.value
         p.track?.let { if (it != currentTrack) onTrackDetected(it) }
-        p.totalLaps?.let { lastTotalLaps = it }
+        // voltas só da corrida (os cartões de série no menu também mostram "N voltas" e confundiam)
+        if (p.screen == GameScreen.RACE) p.totalLaps?.let { lastTotalLaps = it }
         p.weather?.let { lastWeather = it }
 
         when (p.screen) {
@@ -131,7 +132,16 @@ class FrameProcessor(
                     lastWeather = hud.weather
                     lastRaceHud = hud
                     val names = data.garage.drivers.filter { it.equipped }.map { it.name }
-                    val tips = LiveCoach(WearModel(data.tyreObservations)).adviseHud(hud, currentTrack, tm, names)
+                    // Pit: desgaste medido nesta corrida (não modelo). As dicas antigas de desgaste estimado saem.
+                    val total = hud.totalLaps ?: lastTotalLaps
+                    hud.drivers.forEachIndexed { i, d -> liveWear.observe(i, hud.lap, d.tyre, d.tyreLife) }
+                    val pitTips = hud.drivers.indices.mapNotNull { i ->
+                        val d = hud.drivers[i]
+                        liveWear.call(i, hud.lap, total, d.tyre, d.tyreLife, lastRanges, currentLapTimes, hud.weather != Weather.DRY)
+                    }.map { c -> com.leandro.f1clashcoach.core.engine.Tip(if (c.urgent) com.leandro.f1clashcoach.core.engine.TipLevel.URGENT else if (c.pitAtEndOfLap != null) com.leandro.f1clashcoach.core.engine.TipLevel.IMPORTANT else com.leandro.f1clashcoach.core.engine.TipLevel.INFO, c.text, "") }
+                    val modeled = setOf("CONSERVAR", "pare nesta volta", "pode ATACAR")
+                    val tips = (pitTips + LiveCoach(WearModel(data.tyreObservations)).adviseHud(hud, currentTrack, tm, names)
+                        .filter { t -> modeled.none { t.title.contains(it) } }).sortedBy { it.level.ordinal }
                     LiveState.update { it.copy(tips = tips, track = currentTrack) }
                     val rain = hud.rainChance?.let { " • ☔$it%" } ?: ""
                     overlay.setHeader("🏁 V${hud.lap ?: "?"}/${hud.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "corrida"}$rain")
@@ -187,33 +197,39 @@ class FrameProcessor(
                     items.joinToString("\n\n") { "${it.icon} ${it.title}\n${it.detail}" }).trim()
                 onEventScreen(GameMode.GRAND_PRIX, listOfNotNull(gp.name, gp.round).joinToString(" — "), gp.timeLeftMs, advice)
             }
-            GameScreen.PRE_RACE_TYRES -> if (g.tyreLapTimes.isNotEmpty()) {
-                // Tempos reais por composto → plano de pneus para esta corrida.
+            GameScreen.PRE_RACE_TYRES -> if (g.tyreLapTimes.isNotEmpty() || g.tyreLapRanges.isNotEmpty()) {
+                // Só dados do próprio jogo: voltas totais, faixa de voltas de cada pneu e tempo por volta.
                 val avg = com.leandro.f1clashcoach.core.model.Tyre.entries.mapNotNull { t ->
                     g.tyreLapTimes.values.mapNotNull { it[t] }.takeIf { it.isNotEmpty() }?.average()?.let { t to it }
                 }.toMap()
-                currentLapTimes = avg
+                if (avg.isNotEmpty()) currentLapTimes = avg
+                if (g.tyreLapRanges.isNotEmpty()) lastRanges = g.tyreLapRanges
+                g.totalLaps?.let { lastTotalLaps = it }
+                val laps = g.totalLaps ?: lastTotalLaps
                 val track = currentTrack ?: com.leandro.f1clashcoach.core.model.TrackCatalog.byId(d.gp?.trackId)
-                val laps = g.totalLaps ?: lastTotalLaps ?: d.series[d.garage.series]?.laps ?: 6
-                if (track != null) {
-                    val tm = d.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
-                    val pit = d.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: 4.0
-                    val plans = runCatching { RaceStrategist(WearModel(d.tyreObservations)).bestPlans(RaceContext(track, laps, tyreManagement = tm, pitStopTime = pit, lapTimes = avg), top = 2) }.getOrDefault(emptyList())
-                    overlay.showMessage(
-                        "🛞 Largada em ${track.name} ($laps voltas)\n" + plans.joinToString("\n") { pl -> "• ${pl.summary()}" } +
-                            "\nTempos: " + avg.entries.joinToString(" ") { "${it.key.short} ${"%.2f".format(it.value)}s" },
-                        pin = false,
-                    )
-                }
+                val pitLoss = (d.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: 4.0) + 4.0
+                val plans = if (laps != null) com.leandro.f1clashcoach.core.engine.RangePlanner.plans(laps, lastRanges, currentLapTimes, pitLoss) else emptyList()
+                val stops = plans.firstOrNull()?.stops ?: 1
+                val boost = com.leandro.f1clashcoach.core.engine.Boosters.plan(d.garage.boosters, track, stops, lastWinPct, important = d.gp != null && System.currentTimeMillis() - (d.gp?.seenAt ?: 0) < 600_000)
+                overlay.showMessage(buildString {
+                    append("🛞 ${track?.name ?: "Corrida"}")
+                    append(if (laps != null) " • $laps voltas\n" else " • lendo voltas…\n")
+                    if (lastRanges.isNotEmpty()) append("Faixas do jogo: " + lastRanges.entries.joinToString("  ") { "${it.key.short} ${it.value.first}-${it.value.last}v" } + "\n")
+                    plans.take(2).forEachIndexed { i, pl -> append(if (i == 0) "✅ " else "• ").append(pl.summary()).append('\n') }
+                    if (boost.lines.isNotEmpty()) { append("\n🧪 Reforços (dos que você tem):\n"); boost.lines.forEach { append(it).append('\n') } }
+                    else if (d.garage.boosters.isEmpty()) append("\n🧪 Abra Equipe › Reforços uma vez para eu saber quantos você tem.")
+                }.trim(), pin = false)
             }
             GameScreen.PRE_RACE -> g.rivalTeamScore?.let { rival ->
                 val mine = d.garage.teamScore
                 lastRivalScore = rival
+                newRace()
                 if (mine > 0) {
                     val s = com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }
                     val odds = com.leandro.f1clashcoach.core.engine.DuelOddsCalc.estimate(mine, rival, d.races, s)
+                    lastWinPct = if (odds.confident) odds.winPct else when (odds.verdict) { "Favorito" -> 75; "Equilibrado" -> 55; else -> 35 }
                     overlay.showMessage(
-                        "🆚 ${odds.winPct}% de chance • ${odds.verdict}\nVocê $mine x rival $rival" +
+                        "🆚 ${odds.headline}\nVocê $mine x rival $rival" +
                             (odds.expectedFlags?.let { " • ${if (it >= 0) "+" else ""}${"%.1f".format(it)} 🏳 esperadas" } ?: "") +
                             "\n" + odds.tips.take(2).joinToString("\n") { "• $it" },
                         pin = false,
@@ -345,18 +361,12 @@ class FrameProcessor(
         LiveState.update { it.copy(track = track) }
         val data = app.store.data.value
         val setup = SetupOptimizer.optimize(data.garage, track)
-        val laps = lastTotalLaps ?: 6
-        val tm = data.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
-        val pit = data.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: data.garage.parts.filter { it.equipped }.sumOf { it.stats.pitStop }.takeIf { it > 0 } ?: 1.0
-        val plan = runCatching {
-            RaceStrategist(WearModel(data.tyreObservations)).bestPlans(RaceContext(track, laps, tyreManagement = tm, pitStopTime = pit), top = 1).firstOrNull()
-        }.getOrNull()
+        // O plano de pneus só sai na tela de pneus, com as voltas e faixas reais do jogo (nada de chute aqui).
         val msg = buildString {
             append("📍 ${track.name} — ${track.type.label}\n")
             if (setup.changes.isNotEmpty()) {
                 append("Setup:\n"); setup.changes.take(4).forEach { append("• ").append(it).append('\n') }
             } else append("Setup atual já é o melhor que você tem.\n")
-            plan?.let { append("Estratégia ($laps v): ").append(it.summary()) }
             com.leandro.f1clashcoach.core.engine.TrackPlaybook.forTrack(data.races, track.id)?.let { tp ->
                 append("\nSeu histórico aqui: ${tp.wins}/${tp.races} vitórias")
                 tp.bestStrategy?.let { bs -> append(" • melhor: $bs (${tp.bestStrategyWins}/${tp.bestStrategyRaces})") }
@@ -410,6 +420,7 @@ class FrameProcessor(
         )
         app.store.addRace(record)
         lastRivalScore = null
+        newRace()
         if (won == false) reviewRace(record, duel)
         usedTyres.clear(); lastGrid = emptyList()
         val stars = app.store.data.value.let { d -> com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }?.prizeStars }
@@ -449,6 +460,16 @@ class FrameProcessor(
     }
 
     @Volatile private var lastRivalScore: Int? = null
+    @Volatile private var lastWinPct: Int? = null
+    @Volatile private var lastRanges: Map<Tyre, IntRange> = emptyMap()
+    private val liveWear = com.leandro.f1clashcoach.core.engine.LiveWear()
+
+    /** Começo de outra corrida: nada da anterior (voltas, faixas, desgaste) pode vazar. */
+    private fun newRace() {
+        lastTotalLaps = null
+        liveWear.reset()
+        tyreHistory.clear()
+    }
     private var storeNotified = ""
 
     /** Aba Membros lida: avalia quem excluir e avisa (painel + notificação, 1x por dia por pessoa). */

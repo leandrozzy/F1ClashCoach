@@ -94,15 +94,19 @@ object GameSync {
         // O mesmo piloto existe em 3 raridades (cartas azul/laranja/roxa): casa por nome + raridade.
         fun findTile(t: GridTile): Int {
             val same = drivers.indices.filter { key(drivers[it].name) == key(t.name) }
-            // lendários e especiais têm uma carta só: a cor não separa nada
-            if (com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name).size == 1) return same.firstOrNull() ?: -1
-            if (t.rarity == unknown) return same.firstOrNull { drivers[it].progress.cardsNeeded == t.cardsNeeded } ?: if (same.size == 1) same[0] else -1
-            return same.firstOrNull { drivers[it].rarity == t.rarity } ?: same.firstOrNull { drivers[it].rarity == unknown } ?: -1
+            val special = com.leandro.f1clashcoach.core.model.Rarity.SPECIAL
+            // edição especial só casa com a mesma edição especial (nunca com a carta normal do piloto)
+            if (t.rarity == special) return same.firstOrNull { drivers[it].rarity == special && drivers[it].edition == (t.edition ?: "") } ?: -1
+            val normal = same.filter { drivers[it].rarity != special }
+            // lendários têm uma carta só: a cor não separa nada
+            if (com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name).size == 1) return normal.firstOrNull() ?: -1
+            if (t.rarity == unknown) return normal.firstOrNull { drivers[it].progress.cardsNeeded == t.cardsNeeded } ?: if (normal.size == 1) normal[0] else -1
+            return normal.firstOrNull { drivers[it].rarity == t.rarity } ?: normal.firstOrNull { drivers[it].rarity == unknown } ?: -1
         }
         for (t in read.tiles.filter { read.screen == GameScreen.TEAM_DRIVERS }) {
             val i = findTile(t)
             if (i < 0) {
-                drivers += Driver(UUID.randomUUID().toString(), t.name, rarity = t.rarity, progress = Progress(t.level ?: 1, t.cardsOwned, t.cardsNeeded), featured = t.featured)
+                drivers += Driver(UUID.randomUUID().toString(), t.name, rarity = t.rarity, progress = Progress(t.level ?: 1, t.cardsOwned, t.cardsNeeded), featured = t.featured, edition = t.edition ?: "")
                 changes += "Novo piloto: ${t.name}" + if (t.rarity != unknown) " (${t.rarity.label})" else ""
             } else {
                 val d = drivers[i]
@@ -121,11 +125,13 @@ object GameSync {
                 // Os atributos exatos dizem qual carta (raridade + nível) está escalada.
                 val exact = com.leandro.f1clashcoach.core.model.Catalog.matchDriverStats(name!!, stats)
                 val rar = exact?.first?.rarity ?: unknown
-                val same = drivers.indices.filter { key(drivers[it].name) == key(name) }
+                val same = drivers.indices.filter { com.leandro.f1clashcoach.core.model.Catalog.sameName(drivers[it].name, name) }
                 val i = same.firstOrNull { rar != unknown && drivers[it].rarity == rar } ?: same.firstOrNull { drivers[it].rarity == unknown } ?: if (rar == unknown) same.firstOrNull() ?: -1 else -1
                 val lvl = exact?.second
-                if (i < 0) drivers += Driver(UUID.randomUUID().toString(), name, rarity = rar, stats = stats, equipped = true, progress = Progress(lvl ?: 1))
-                else drivers[i] = drivers[i].copy(stats = stats, equipped = true, rarity = if (rar != unknown) rar else drivers[i].rarity,
+                // com a carta identificada, usa os atributos da base (o OCR pode errar um número)
+                val st = exact?.let { (d, l) -> d.at(l) } ?: stats
+                if (i < 0) drivers += Driver(UUID.randomUUID().toString(), name, rarity = rar, stats = st, equipped = true, progress = Progress(lvl ?: 1))
+                else drivers[i] = drivers[i].copy(stats = st, equipped = true, rarity = if (rar != unknown) rar else drivers[i].rarity,
                     progress = if (lvl != null) drivers[i].progress.copy(level = lvl) else drivers[i].progress)
             }
             changes += "Pilotos escalados: ${read.driverPair.joinToString { it.first!! }}"
