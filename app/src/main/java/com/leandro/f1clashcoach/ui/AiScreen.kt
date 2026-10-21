@@ -79,7 +79,9 @@ fun AiScreen(vm: MainViewModel, modifier: Modifier, onOpenUrl: (String) -> Unit)
                     ) {
                         SelectionContainer { Text(m.text, fontSize = 14.sp) }
                         m.sources.take(6).forEach { s ->
-                            val (title, url) = s.split("|", limit = 2).let { it[0] to it.getOrElse(1) { it[0] } }
+                            val parts = s.split("|", limit = 2)
+                            val title = parts[0]
+                            val url = parts.getOrElse(1) { parts[0] }
                             Text("🔗 $title", fontSize = 12.sp, color = Color(0xFF6CB4FF), textDecoration = TextDecoration.Underline,
                                 modifier = Modifier.clickable { onOpenUrl(url) }.padding(top = 2.dp))
                         }
