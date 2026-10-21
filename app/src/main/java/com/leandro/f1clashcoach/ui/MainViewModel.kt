@@ -66,7 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val image = imageUri?.let { uri ->
                     withContext(Dispatchers.IO) { ImageUtils.loadUri(app, uri)?.let { AiImage(ImageUtils.toJpeg(it), "image/jpeg") } }
                 }
-                val prompt = CoachPrompts.withContext(q, CoachPrompts.accountContext(d.garage, d.races, focusTrack, d.events))
+                val prompt = CoachPrompts.withContext(q, CoachPrompts.accountContext(d.garage, d.races, focusTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp))
                 val answer = advisor.ask(AiRequest(CoachPrompts.system(), prompt, history, image, webSearch))
                 store.addChat(ChatMessage(false, answer.text.ifBlank { "(sem resposta)" }, answer.sources.map { "${it.title}|${it.url}" }))
                 if (webSearch && q == CoachPrompts.WEEKLY_META) store.update { it.copy(lastMeta = answer.text, lastMetaTime = System.currentTimeMillis()) }
@@ -93,14 +93,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val d = store.data.value
         val today = LocalDate.now().toString()
         val lastDay = if (d.aiBriefingTime == 0L) "" else java.time.Instant.ofEpochMilli(d.aiBriefingTime).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
-        val newEvent = d.events.any { it.firstSeen > d.aiBriefingTime }
+        val newEvent = d.events.any { it.firstSeen > d.aiBriefingTime && it.mode != com.leandro.f1clashcoach.core.model.GameMode.SEASON && it.mode != com.leandro.f1clashcoach.core.model.GameMode.CLUB }
         if (!force && lastDay == today && !newEvent) return
         _briefingBusy.value = true
         _briefingError.value = null
         viewModelScope.launch {
             try {
                 val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
-                val prompt = CoachPrompts.withContext(CoachPrompts.DAILY_BRIEFING, CoachPrompts.accountContext(d.garage, d.races, null, d.events))
+                val prompt = CoachPrompts.withContext(CoachPrompts.DAILY_BRIEFING, CoachPrompts.accountContext(d.garage, d.races, null, d.events, System.currentTimeMillis(), d.objectives, d.gp))
                 val a = advisor.ask(AiRequest(CoachPrompts.system(), prompt, webSearch = true))
                 store.setBriefing(a.text, a.sources.map { "${it.title}|${it.url}" })
             } catch (e: Exception) {

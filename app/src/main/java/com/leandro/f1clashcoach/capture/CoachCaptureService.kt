@@ -132,22 +132,18 @@ class CoachCaptureService : Service() {
         return START_NOT_STICKY
     }
 
-    /** Tamanho da captura: tela inteira em paisagem, limitada a ~1600px no lado maior (bom para OCR e bateria). */
+    /** Tamanho da captura: mesma orientação da tela (o F1 Clash roda em pé), lado maior até ~1600px. */
     private fun captureSize(srcW: Int? = null, srcH: Int? = null): Pair<Int, Int> {
         val (rw, rh) = if (srcW != null && srcH != null) srcW to srcH else {
             val wm = getSystemService(WindowManager::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val b = wm.maximumWindowMetrics.bounds; b.width() to b.height()
+                val b = wm.currentWindowMetrics.bounds; b.width() to b.height()
             } else {
                 val m = resources.displayMetrics; m.widthPixels to m.heightPixels
             }
         }
-        // O F1 Clash roda em paisagem.
-        val long = maxOf(rw, rh); val short = minOf(rw, rh)
-        val landscape = srcW == null || srcW >= srcH!!
-        val scale = minOf(1f, 1600f / long)
-        val lw = (long * scale).toInt().coerceAtLeast(2); val sh = (short * scale).toInt().coerceAtLeast(2)
-        return if (landscape) lw to sh else sh to lw
+        val scale = minOf(1f, 1600f / maxOf(rw, rh))
+        return (rw * scale).toInt().coerceAtLeast(2) to (rh * scale).toInt().coerceAtLeast(2)
     }
 
     private fun resize(width: Int, height: Int) {
@@ -170,7 +166,7 @@ class CoachCaptureService : Service() {
             LiveState.lastFrame = bitmap
             try {
                 val lines = ocr.read(bitmap)
-                val parsed = com.leandro.f1clashcoach.core.engine.ScreenReader.parse(lines)
+                val parsed = com.leandro.f1clashcoach.core.engine.ScreenReader.parse(lines, lastSlot)
                 handle(parsed)
                 LiveState.update { it.copy(framesRead = it.framesRead + 1, lastParsed = parsed, screen = parsed.screen) }
             } catch (e: Exception) {
@@ -200,26 +196,84 @@ class CoachCaptureService : Service() {
             }
             GameScreen.RACE_RESULT -> onResult(p, settings.autoRecordResults)
             GameScreen.PARTS, GameScreen.DRIVERS, GameScreen.UPGRADE -> if (settings.autoScanGarage) scanGarage(p)
+            GameScreen.HOME, GameScreen.RACE_MENU, GameScreen.GP, GameScreen.OBJECTIVES, GameScreen.TEAM_DRIVERS,
+            GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE -> onGameScreen(p)
             else -> {
                 val mode = p.mode
                 if (mode != null && mode != GameMode.CLUB && mode != GameMode.SEASON && p.title != null &&
                     (p.screen == GameScreen.EVENT || p.timeLeftMs != null)
-                ) onEventScreen(p, mode, p.title!!)
+                ) onEventScreen(mode, p.title!!, p.timeLeftMs)
                 else overlay.setHeader("🏁 F1 Coach • ${mode?.label ?: p.screen.label}")
             }
+        }
+        if (p.screen != GameScreen.TEAM_CARS) lastSlot = null
+    }
+
+    /** Último slot de peça visto (a grade rola e o cabeçalho some da tela). */
+    @Volatile private var lastSlot: com.leandro.f1clashcoach.core.model.PartSlot? = null
+
+    /** Telas de menu do jogo: sincroniza a conta e mostra no painel o que importa naquela tela. */
+    private fun onGameScreen(p: ParsedScreen) {
+        val g = p.game ?: return
+        g.tiles.lastOrNull { it.slot != null }?.slot?.let { lastSlot = it }
+        val changes = if (app.settings.state.value.autoScanGarage) app.store.applyGameRead(g) else emptyList()
+        changes.take(3).forEach { LiveState.event(it) }
+        val d = app.store.data.value
+        val now = System.currentTimeMillis()
+        overlay.setHeader("🏁 F1 Coach • ${p.screen.label}")
+        when (p.screen) {
+            GameScreen.GP, GameScreen.RACE_MENU -> g.gp?.let { gp ->
+                val items = DailyBriefing.build(d.garage, d.races, d.events, d.tyreObservations, d.lastMetaTime, now, d.objectives, d.gp)
+                    .filter { it.icon in setOf("🏆", "⛔", "⭐") }
+                val advice = items.joinToString("\n\n") { "${it.icon} ${it.title}\n${it.detail}" }
+                onEventScreen(GameMode.GRAND_PRIX, listOfNotNull(gp.name, gp.round).joinToString(" — "), gp.timeLeftMs, advice)
+            }
+            GameScreen.PIT_PASS, GameScreen.HOME -> {
+                if (g.seasonName != null && g.seasonLeftMs != null) app.store.upsertEvent(GameMode.SEASON, "Pit Pass ${g.seasonName}", g.seasonLeftMs)
+                if (g.freeCrateReady) overlay.showMessage("🎁 Caixote grátis disponível — abra antes de correr.", pin = false)
+            }
+            GameScreen.CLUB -> if (g.clubLeagueName != null) app.store.upsertEvent(GameMode.CLUB, "Liga de clubes ${g.clubLeagueName}", g.clubLeagueLeftMs)
+            GameScreen.OBJECTIVES -> {
+                val pend = d.objectives.filter { !it.done }.sortedBy { it.weekly }
+                overlay.showMessage(
+                    if (pend.isEmpty()) "✅ Todos os objetivos lidos estão completos."
+                    else "📋 Objetivos pendentes:\n" + pend.take(5).joinToString("\n") { "• ${it.text.take(60)} (${it.progress}/${it.target})\n   ${DailyBriefing.objectiveHint(it.text)}" },
+                    pin = false,
+                )
+            }
+            GameScreen.TEAM_CARS, GameScreen.TEAM_DRIVERS -> {
+                val ready = com.leandro.f1clashcoach.core.engine.UpgradePlanner.plan(d.garage).ranked.filter { it.canUpgradeNow }
+                overlay.showMessage(
+                    "🔧 Garagem: ${d.garage.parts.size} peças • ${d.garage.drivers.size} pilotos • pontuação ${d.garage.teamScore}\n" +
+                        (if (ready.isEmpty()) "Nenhum item com cartas suficientes." else "⬆️ Prontos para evoluir: ${ready.take(4).joinToString { it.name }}" + if (ready.size > 4) " (+${ready.size - 4})" else "") +
+                        (d.garage.drivers.filter { it.equipped && it.legendary }.takeIf { it.isNotEmpty() }?.let { "\n👑 Lendário escalado: ${it.joinToString { x -> x.name }} (alguns GPs proíbem)" } ?: ""),
+                    pin = false,
+                )
+            }
+            GameScreen.STORE -> if (d.garage.featuredAssets.isNotEmpty()) {
+                val mine = (d.garage.drivers.filter { it.featured }.map { it.name } + d.garage.parts.filter { it.featured }.map { it.name })
+                overlay.showMessage(
+                    "⭐ Destaques da semana: ${d.garage.featuredAssets.take(6).joinToString()}" +
+                        (if (mine.isNotEmpty()) "\nVocê já tem: ${mine.take(4).joinToString()} — priorize evoluir/usar esses." else "\nVocê não tem nenhum destaque: só compre se for peça/piloto que você vai usar."),
+                    pin = false,
+                )
+            }
+            else -> Unit
         }
     }
 
     private var lastAutoAiAt = 0L
 
     /** Tela de evento/GP/exibição/momentos: registra, mostra a dica e pede análise automática à IA uma vez. */
-    private fun onEventScreen(p: ParsedScreen, mode: GameMode, title: String) {
-        val (ev, isNew) = app.store.upsertEvent(mode, title, p.timeLeftMs)
+    private fun onEventScreen(mode: GameMode, title: String, timeLeftMs: Long?, localAdvice: String? = null) {
+        val (ev, isNew) = app.store.upsertEvent(mode, title, timeLeftMs)
         val left = ev.remainingMs(System.currentTimeMillis())?.let { " • faltam ${DailyBriefing.formatLeft(it)}" } ?: ""
         overlay.setHeader("🎯 ${mode.label}$left")
         if (isNew) {
             LiveState.event("${mode.label} detectado: $title")
-            overlay.showMessage("${mode.label}: $title$left\n\n${mode.tip}", pin = false)
+            overlay.showMessage("${mode.label}: $title$left\n\n${localAdvice?.takeIf { it.isNotBlank() } ?: mode.tip}", pin = false)
+        } else if (ev.aiAdvice.isBlank() && !localAdvice.isNullOrBlank()) {
+            overlay.showMessage("${mode.label}: $title$left\n\n$localAdvice", pin = false)
         } else if (ev.aiAdvice.isNotBlank()) {
             overlay.showMessage("${mode.label}: $title$left\n\n${ev.aiAdvice}", pin = false)
         }
@@ -232,7 +286,7 @@ class CoachCaptureService : Service() {
                 runCatching {
                     val d = app.store.data.value
                     val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
-                    val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events)
+                    val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp)
                     advisor.ask(AiRequest(CoachPrompts.system(), CoachPrompts.withContext(CoachPrompts.eventAnalysis(mode.label, title), ctx),
                         image = AiImage(ImageUtils.toJpeg(frame), "image/jpeg"), webSearch = true))
                 }.onSuccess { a ->
@@ -251,7 +305,7 @@ class CoachCaptureService : Service() {
         val setup = SetupOptimizer.optimize(data.garage, track)
         val laps = lastTotalLaps ?: 6
         val tm = data.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
-        val pit = data.garage.parts.filter { it.equipped }.sumOf { it.stats.pitStop }.takeIf { it > 0 } ?: 1.0
+        val pit = data.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: data.garage.parts.filter { it.equipped }.sumOf { it.stats.pitStop }.takeIf { it > 0 } ?: 1.0
         val plan = runCatching {
             RaceStrategist(WearModel(data.tyreObservations)).bestPlans(RaceContext(track, laps, tyreManagement = tm, pitStopTime = pit), top = 1).firstOrNull()
         }.getOrNull()
@@ -348,7 +402,7 @@ class CoachCaptureService : Service() {
             val text = try {
                 val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
                 val d = app.store.data.value
-                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events)
+                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp)
                 val prompt = CoachPrompts.withContext(
                     CoachPrompts.ANALYZE_SCREENSHOT + " Estou no meio do jogo: responda em no máximo 6 linhas curtas.", ctx,
                 )

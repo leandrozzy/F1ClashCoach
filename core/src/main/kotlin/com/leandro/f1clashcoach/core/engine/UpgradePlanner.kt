@@ -2,6 +2,7 @@ package com.leandro.f1clashcoach.core.engine
 
 import com.leandro.f1clashcoach.core.model.DriverWeights
 import com.leandro.f1clashcoach.core.model.Garage
+import com.leandro.f1clashcoach.core.model.Progress
 import com.leandro.f1clashcoach.core.model.StatWeights
 import com.leandro.f1clashcoach.core.model.Track
 import com.leandro.f1clashcoach.core.model.TrackCatalog
@@ -44,23 +45,31 @@ object UpgradePlanner {
 
         // Peças equipadas e as melhores de cada slot valem mais: são as que você usa.
         val usefulPartIds = garage.parts.groupBy { it.slot }.values.flatMap { list ->
-            list.sortedByDescending { carW.score(it.stats) }.take(2).map { it.id }
-        }.toSet() + garage.parts.filter { it.equipped }.map { it.id }
-        val usefulDriverIds = garage.drivers.sortedByDescending { drvW.score(it.stats) }.take(3).map { it.id }.toSet() +
-            garage.drivers.filter { it.equipped }.map { it.id }
+            list.filter { it.stats.total > 0 }.sortedByDescending { carW.score(it.stats) }.take(2).map { it.id }
+        }.toSet() + garage.parts.filter { it.equipped || it.featured }.map { it.id }
+        val usefulDriverIds = garage.drivers.filter { it.stats.total > 0 }.sortedByDescending { drvW.score(it.stats) }.take(3).map { it.id }.toSet() +
+            garage.drivers.filter { it.equipped || it.featured }.map { it.id }
 
         val advices = mutableListOf<UpgradeAdvice>()
         for (p in garage.parts) {
             val next = p.nextLevelStats
-            val gain = if (next != null) carW.score(next) - carW.score(p.stats) else carW.score(p.stats) * EST_GAIN_PER_LEVEL
+            val gain = when {
+                next != null -> carW.score(next) - carW.score(p.stats)
+                p.stats.total > 0 -> carW.score(p.stats) * EST_GAIN_PER_LEVEL
+                else -> heuristic(p.equipped, p.progress.level, p.featured)
+            }
             val relevance = if (p.id in usefulPartIds) 1.0 else 0.35
-            advices += advice(p.id, p.name, p.slot.label, p.progress.level, p.progress.canUpgrade, gain * relevance, next == null, p.progress.upgradeCoins, p.progress.cardsMissing)
+            advices += advice(p.id, p.name, p.slot.label, p.progress.level, p.progress.canUpgrade, gain * relevance, next == null, p.progress.upgradeCoins, p.progress.cardsMissing, p.progress, p.equipped)
         }
         for (d in garage.drivers) {
             val next = d.nextLevelStats
-            val gain = if (next != null) drvW.score(next) - drvW.score(d.stats) else drvW.score(d.stats) * EST_GAIN_PER_LEVEL
+            val gain = when {
+                next != null -> drvW.score(next) - drvW.score(d.stats)
+                d.stats.total > 0 -> drvW.score(d.stats) * EST_GAIN_PER_LEVEL
+                else -> heuristic(d.equipped, d.progress.level, d.featured)
+            }
             val relevance = if (d.id in usefulDriverIds) 1.0 else 0.35
-            advices += advice(d.id, d.name, "Piloto", d.progress.level, d.progress.canUpgrade, gain * relevance, next == null, d.progress.upgradeCoins, d.progress.cardsMissing)
+            advices += advice(d.id, d.name, if (d.legendary) "Piloto lendário" else "Piloto", d.progress.level, d.progress.canUpgrade, gain * relevance, next == null, d.progress.upgradeCoins, d.progress.cardsMissing, d.progress, d.equipped)
         }
 
         val ranked = advices.sortedWith(compareByDescending<UpgradeAdvice> { it.canUpgradeNow }.thenByDescending { it.efficiency })
@@ -72,20 +81,25 @@ object UpgradePlanner {
                 coins -= a.coins
             }
         }
-        val collect = advices.filter { !it.canUpgradeNow && it.gain > 0 }.sortedByDescending { it.gain }.take(5)
+        val collect = advices.filter { !it.canUpgradeNow && it.gain > 0 && it.reason.startsWith("Faltam") }.sortedByDescending { it.gain }.take(5)
         return UpgradePlan(ranked, doNow, coins, collect)
     }
 
+    /** Sem atributos lidos: o que está equipado (e em destaque) rende mais. */
+    private fun heuristic(equipped: Boolean, level: Int, featured: Boolean): Double =
+        (if (equipped) 12.0 else 3.0) * (1 + level * 0.05) * (if (featured) 1.3 else 1.0)
+
     private fun advice(
         id: String, name: String, kind: String, level: Int, can: Boolean, gain: Double,
-        estimate: Boolean, coins: Int, cardsMissing: Int,
+        estimate: Boolean, coins: Int, cardsMissing: Int, progress: Progress, equipped: Boolean,
     ): UpgradeAdvice {
         val eff = if (coins > 0) gain / coins * 1000.0 else gain
+        val tag = if (equipped) " • equipado" else ""
         val reason = when {
-            !can && cardsMissing > 0 -> "Faltam $cardsMissing cartas"
+            !can && cardsMissing > 0 -> "Faltam $cardsMissing cartas (${progress.cardsOwned}/${progress.cardsNeeded})$tag"
             !can -> "Informe cartas/custo para avaliar"
-            coins == 0 -> "Pronto para evoluir (custo não informado)"
-            else -> "+${"%.1f".format(gain)} pts por ${coins} moedas"
+            coins == 0 -> "Cartas prontas (${progress.cardsOwned}/${progress.cardsNeeded})$tag"
+            else -> "+${"%.1f".format(gain)} pts por ${coins} moedas$tag"
         }
         return UpgradeAdvice(id, name, kind, level, can, gain, estimate, coins, eff, reason)
     }

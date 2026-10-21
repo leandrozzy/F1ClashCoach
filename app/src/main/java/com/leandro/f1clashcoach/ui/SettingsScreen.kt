@@ -61,6 +61,14 @@ fun SettingsScreen(vm: MainViewModel, modifier: Modifier) {
             }
         }
         item {
+            val data by vm.store.data.collectAsState()
+            SectionCard("Seu perfil no jogo") {
+                OutlinedTextField(data.garage.playerName, { v -> vm.store.update { it.copy(garage = it.garage.copy(playerName = v)) } },
+                    label = { Text("Seu nome no F1 Clash") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Usado para achar você nos rankings do Grand Prix e da liga.", fontSize = 12.sp, color = Muted)
+            }
+        }
+        item {
             SectionCard("Coach ao vivo") {
                 Text("Leitura da tela a cada ${"%.1f".format(s.ocrIntervalMs / 1000.0)}s (menor = mais rápido, gasta mais bateria)", fontSize = 13.sp)
                 Slider(value = s.ocrIntervalMs.toFloat(), onValueChange = { v -> vm.settings.update { it.copy(ocrIntervalMs = (v / 100).toLong() * 100) } }, valueRange = 500f..3000f)

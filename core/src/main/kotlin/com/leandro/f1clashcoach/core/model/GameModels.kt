@@ -82,6 +82,8 @@ data class Part(
     /** Atributos no próximo nível, se o usuário (ou OCR) souber. */
     val nextLevelStats: CarStats? = null,
     val equipped: Boolean = false,
+    /** Recurso em destaque da semana (+10% nas estatísticas em eventos). */
+    val featured: Boolean = false,
 )
 
 @Serializable
@@ -93,7 +95,25 @@ data class Driver(
     val progress: Progress = Progress(),
     val nextLevelStats: DriverStats? = null,
     val equipped: Boolean = false,
-)
+    val featured: Boolean = false,
+) {
+    /** Lendário = não está no grid atual (alguns GPs proíbem lendários). */
+    val legendary: Boolean get() = !CurrentGrid.isCurrent(name)
+}
+
+/** Pilotos do grid atual da F1 (o resto do jogo são lendas/edições especiais). */
+object CurrentGrid {
+    private val SURNAMES = setOf(
+        "VERSTAPPEN", "HADJAR", "LECLERC", "HAMILTON", "RUSSELL", "ANTONELLI", "NORRIS", "PIASTRI", "ALONSO", "STROLL",
+        "GASLY", "COLAPINTO", "ALBON", "SAINZ", "OCON", "BEARMAN", "HULKENBERG", "BORTOLETO", "LAWSON", "LINDBLAD",
+        "PEREZ", "BOTTAS", "TSUNODA", "DOOHAN",
+    )
+
+    fun isCurrent(name: String): Boolean {
+        val up = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").uppercase()
+        return SURNAMES.any { up.contains(it) }
+    }
+}
 
 @Serializable
 data class Garage(
@@ -104,6 +124,47 @@ data class Garage(
     val series: Int = 1,
     val trophies: Int = 0,
     val playerName: String = "",
+    /** Pontuação da equipe mostrada no jogo. */
+    val teamScore: Int = 0,
+    /** Totais do carro equipado (aba Equipe → Carros). */
+    val carTotals: CarStats? = null,
+    /** Recursos em destaque da semana vistos na loja/eventos. */
+    val featuredAssets: List<String> = emptyList(),
+    val featuredSeenAt: Long = 0,
+    /** Reforços (boosters) disponíveis e quantidade. */
+    val boosters: Map<String, Int> = emptyMap(),
+    val clubName: String = "",
+    val updatedAt: Long = 0,
+)
+
+@Serializable
+data class Objective(
+    val weekly: Boolean,
+    val text: String,
+    val progress: Int,
+    val target: Int,
+    val reward: Long? = null,
+    val endsAt: Long? = null,
+    val seenAt: Long = 0,
+) {
+    val done: Boolean get() = progress >= target
+}
+
+@Serializable
+data class GrandPrixState(
+    val name: String,
+    val trackId: String? = null,
+    val round: String? = null,
+    val roundEndsAt: Long? = null,
+    val recommendedScore: Int? = null,
+    val entryFee: Long? = null,
+    val legendaryAllowed: Boolean? = null,
+    val tier: String? = null,
+    val racesPlayed: Int? = null,
+    val racesTotal: Int? = null,
+    val featuredBoostPct: Int? = null,
+    val myPoints: Int? = null,
+    val seenAt: Long = 0,
 )
 
 @Serializable

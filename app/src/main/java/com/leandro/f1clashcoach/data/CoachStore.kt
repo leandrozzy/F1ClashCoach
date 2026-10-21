@@ -5,6 +5,10 @@ import com.leandro.f1clashcoach.core.ai.ChatTurn
 import com.leandro.f1clashcoach.core.model.ActiveEvent
 import com.leandro.f1clashcoach.core.model.CarStats
 import com.leandro.f1clashcoach.core.model.GameMode
+import com.leandro.f1clashcoach.core.model.GrandPrixState
+import com.leandro.f1clashcoach.core.model.Objective
+import com.leandro.f1clashcoach.core.engine.GameRead
+import com.leandro.f1clashcoach.core.engine.GameSync
 import com.leandro.f1clashcoach.core.model.Driver
 import com.leandro.f1clashcoach.core.model.DriverStats
 import com.leandro.f1clashcoach.core.model.Garage
@@ -42,6 +46,10 @@ data class CoachData(
     val aiBriefing: String = "",
     val aiBriefingSources: List<String> = emptyList(),
     val aiBriefingTime: Long = 0,
+    /** Objetivos diários/semanais lidos da tela do jogo. */
+    val objectives: List<Objective> = emptyList(),
+    /** Grand Prix em andamento (lido das telas do GP). */
+    val gp: GrandPrixState? = null,
 )
 
 /** Tudo que o Coach sabe fica neste arquivo JSON, no próprio aparelho. */
@@ -58,6 +66,7 @@ class CoachStore(context: Context) {
     @Synchronized
     fun update(transform: (CoachData) -> CoachData) {
         val next = transform(_data.value)
+        if (next == _data.value) return
         _data.value = next
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(json.encodeToString(CoachData.serializer(), next))
@@ -124,6 +133,18 @@ class CoachStore(context: Context) {
     fun addRace(r: RaceRecord) = update { d -> d.copy(races = (d.races + r).takeLast(2000)) }
     fun removeRace(id: String) = update { d -> d.copy(races = d.races.filterNot { it.id == id }) }
     fun addTyreObservation(o: TyreObservation) = update { d -> d.copy(tyreObservations = (d.tyreObservations + o).takeLast(3000)) }
+
+    // ---------- Sincronização com as telas do jogo ----------
+    /** Aplica uma leitura de tela à conta. Retorna o que mudou (para avisar no painel). */
+    fun applyGameRead(read: GameRead, now: Long = System.currentTimeMillis()): List<String> {
+        var changes = emptyList<String>()
+        update { d ->
+            val r = GameSync.apply(d.garage, read, d.objectives, d.gp, now)
+            changes = r.changes
+            d.copy(garage = r.garage, objectives = r.objectives ?: d.objectives, gp = r.gp ?: d.gp)
+        }
+        return changes
+    }
 
     // ---------- Eventos / modos ----------
     /** Registra um evento visto na tela. Retorna o evento e se é novo. */

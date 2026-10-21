@@ -53,7 +53,7 @@ fun RaceScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
     val track = TrackCatalog.byId(trackId)!!
     val setup = remember(data.garage, trackId) { SetupOptimizer.optimize(data.garage, track) }
     val tm = data.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
-    val pit = data.garage.parts.filter { it.equipped }.sumOf { it.stats.pitStop }.takeIf { it > 0 } ?: 1.0
+    val pit = data.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: data.garage.parts.filter { it.equipped }.sumOf { it.stats.pitStop }.takeIf { it > 0 } ?: 1.0
     val weatherByLap = if (weather == Weather.DRY) emptyList() else List(laps) { i -> if (i + 1 >= rainFrom.roundToInt()) weather else Weather.DRY }
     val wear = remember(data.tyreObservations) { WearModel(data.tyreObservations) }
 

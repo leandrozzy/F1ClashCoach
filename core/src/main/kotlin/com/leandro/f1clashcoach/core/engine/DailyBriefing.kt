@@ -3,6 +3,8 @@ package com.leandro.f1clashcoach.core.engine
 import com.leandro.f1clashcoach.core.model.ActiveEvent
 import com.leandro.f1clashcoach.core.model.Garage
 import com.leandro.f1clashcoach.core.model.GameMode
+import com.leandro.f1clashcoach.core.model.GrandPrixState
+import com.leandro.f1clashcoach.core.model.Objective
 import com.leandro.f1clashcoach.core.model.RaceRecord
 import com.leandro.f1clashcoach.core.model.TyreObservation
 
@@ -35,8 +37,61 @@ object DailyBriefing {
         tyreObs: List<TyreObservation>,
         lastMetaTime: Long,
         now: Long,
+        objectives: List<Objective> = emptyList(),
+        gp: GrandPrixState? = null,
     ): List<BriefingItem> {
         val items = mutableListOf<BriefingItem>()
+
+        // 0) Grand Prix (o que mais rende moedas/cartas na semana)
+        if (gp != null && (gp.roundEndsAt == null || gp.roundEndsAt > now)) {
+            val left = gp.roundEndsAt?.let { formatLeft(it - now) }
+            val played = if (gp.racesPlayed != null && gp.racesTotal != null) " • ${gp.racesPlayed}/${gp.racesTotal} corridas" else ""
+            val detail = buildList {
+                gp.recommendedScore?.let { rec ->
+                    if (garage.teamScore in 1 until rec) add("Sua pontuação (${garage.teamScore}) está abaixo da recomendada ($rec) para ${gp.tier ?: "este nível"}: escolha um nível abaixo.")
+                    else if (garage.teamScore >= rec) add("Pontuação ${garage.teamScore} ≥ $rec recomendada: nível adequado.")
+                }
+                gp.entryFee?.let { add("Entrada: ${it / 1000}k moedas (paga uma vez).") }
+                add("Classificatória: termine entre os 70% melhores (até 4 corridas).")
+            }.joinToString(" ")
+            items += BriefingItem(
+                if (gp.roundEndsAt != null && gp.roundEndsAt - now < 6 * HOUR) 0 else 1, "🏆",
+                "${gp.name}: ${gp.round ?: "rodada"}" + (left?.let { " — faltam $it" } ?: "") + played,
+                detail, BriefingAction.RACE,
+            )
+            val legendEquipped = garage.drivers.filter { it.equipped && it.legendary }
+            if (gp.legendaryAllowed == false && legendEquipped.isNotEmpty()) {
+                val sub = garage.drivers.filter { !it.equipped && !it.legendary }.maxByOrNull { it.stats.total * 10 + it.progress.level }
+                items += BriefingItem(
+                    0, "⛔", "Troque ${legendEquipped.joinToString { it.name }} antes do GP",
+                    "Este Grand Prix não permite pilotos lendários." + (sub?.let { " Sugestão: ${it.name} (nível ${it.progress.level})." } ?: ""),
+                    BriefingAction.GARAGE,
+                )
+            }
+            val feat = (garage.drivers.filter { it.featured }.map { it.name } + garage.parts.filter { it.featured }.map { it.name }).distinct()
+            if (feat.isNotEmpty() && gp.featuredBoostPct != null) {
+                items += BriefingItem(
+                    1, "⭐", "Use seus destaques (+${gp.featuredBoostPct}%) no GP",
+                    "Você tem: ${feat.take(4).joinToString()}. Recursos em destaque ganham bônus nas estatísticas durante o evento.",
+                    BriefingAction.GARAGE,
+                )
+            }
+        }
+
+        // 0b) Objetivos do jogo (diários e semanais)
+        objectives.filter { !it.done && (it.endsAt == null || it.endsAt > now) }
+            .sortedWith(compareBy({ it.weekly }, { it.endsAt ?: Long.MAX_VALUE }))
+            .take(5)
+            .forEach { o ->
+                val left = o.endsAt?.let { formatLeft(it - now) }
+                items += BriefingItem(
+                    when { !o.weekly && o.endsAt != null && o.endsAt - now < 4 * HOUR -> 0; !o.weekly -> 1; else -> 3 },
+                    if (o.weekly) "🗓️" else "✅",
+                    "${if (o.weekly) "Semanal" else "Diário"}: ${o.text.take(70)} (${o.progress}/${o.target})",
+                    objectiveHint(o.text) + (left?.let { " Faltam $it." } ?: ""),
+                    BriefingAction.OPEN_GAME,
+                )
+            }
 
         // 1) Dados mínimos
         if (garage.parts.size < 7 || garage.drivers.size < 2) {
@@ -65,7 +120,8 @@ object DailyBriefing {
                     ". Pesquise como funciona e as recompensas, e me diga exatamente como jogar e o que priorizar com a minha garagem.",
             )
         }
-        val sawGpThisWeek = events.any { it.mode == GameMode.GRAND_PRIX && now - it.lastSeen < 7 * DAY }
+        val sawGpThisWeek = events.any { it.mode == GameMode.GRAND_PRIX && now - it.lastSeen < 7 * DAY } ||
+            (gp != null && now - gp.seenAt < 7 * DAY)
         if (!sawGpThisWeek) {
             items += BriefingItem(
                 3, "🏆", "Confira o Grand Prix da semana",
@@ -94,7 +150,14 @@ object DailyBriefing {
         if (garage.parts.isNotEmpty() || garage.drivers.isNotEmpty()) {
             val focus = HistoryAnalyzer.analyze(races).byTrack.take(6).map { it.track }
             val plan = UpgradePlanner.plan(garage, focus)
-            plan.doNow.take(3).forEach { a ->
+            val ready = plan.ranked.filter { it.canUpgradeNow }
+            if (ready.size > 3) {
+                items += BriefingItem(
+                    1, "⬆️", "${ready.size} itens com cartas para evoluir",
+                    "Comece por: ${ready.take(4).joinToString { it.name }}. Peças equipadas primeiro — você tem ${garage.coins / 1_000_000}M moedas.",
+                    BriefingAction.EVOLVE,
+                )
+            } else plan.doNow.take(3).forEach { a ->
                 items += BriefingItem(1, "⬆️", "Evolua ${a.name}", "${a.kind} nível ${a.level} → ${a.level + 1}. ${a.reason}.", BriefingAction.EVOLVE)
             }
             plan.collectCards.firstOrNull()?.let { a ->
@@ -131,6 +194,22 @@ object DailyBriefing {
         }
 
         return items.distinctBy { it.title }.sortedBy { it.priority }
+    }
+
+    /** Como cumprir cada tipo de objetivo do jogo. */
+    fun objectiveHint(text: String): String {
+        val t = Txt.compact(text)
+        return when {
+            Txt.has(t, "GRANDPRIX") && (Txt.has(t, "DERROTE") || Txt.has(t, "RIVAIS")) -> "Vença duelos ou corridas do Grand Prix; use o setup e a estratégia da aba Corrida."
+            Txt.has(t, "GRANDPRIX") -> "Entre no Grand Prix (aba Corrida do jogo) — conta também para o evento."
+            Txt.has(t, "DUELOS") || Txt.has(t, "CORRIDAS") -> "Jogue Duelos da sua série; o Coach registra cada resultado."
+            Txt.has(t, "REFORCOS") -> "Antes de largar, equipe um reforço (você tem vários no estoque)."
+            Txt.has(t, "ATUALIZE") || Txt.has(t, "EVOLUA") || Txt.has(t, "UPGRADE") -> "Evolua um item com cartas prontas (veja a aba Evoluir)."
+            Txt.has(t, "CAIXOTES") || Txt.has(t, "CAIXOTE") -> "Abra os caixotes da garagem/loja."
+            Txt.has(t, "ANUNCIOS") -> "Loja → Ganhe recompensas diárias → Assistir."
+            Txt.has(t, "ENTRENOJOGO") -> "Já conta ao abrir o jogo."
+            else -> "Siga o objetivo no jogo."
+        }
     }
 
     fun formatLeft(ms: Long): String {

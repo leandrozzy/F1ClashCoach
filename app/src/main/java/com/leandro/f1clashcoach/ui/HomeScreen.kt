@@ -54,7 +54,7 @@ fun HomeScreen(
     val briefingError by vm.briefingError.collectAsState()
     val now = remember(data) { System.currentTimeMillis() }
     val report = remember(data.races) { HistoryAnalyzer.analyze(data.races) }
-    val plan = remember(data) { DailyBriefing.build(data.garage, data.races, data.events, data.tyreObservations, data.lastMetaTime, now) }
+    val plan = remember(data) { DailyBriefing.build(data.garage, data.races, data.events, data.tyreObservations, data.lastMetaTime, now, data.objectives, data.gp) }
     val today = LocalDate.now().toString()
     val done = if (data.daily.day == today) data.daily.done else emptySet()
     var showAllPlan by remember { mutableStateOf(false) }
@@ -166,8 +166,9 @@ fun HomeScreen(
             SectionCard("Sua conta") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                     Stat("Série", data.garage.series.toString())
-                    Stat("Troféus", data.garage.trophies.toString())
+                    Stat("Pontuação", if (data.garage.teamScore > 0) data.garage.teamScore.toString() else "—")
                     Stat("Moedas", formatK(data.garage.coins))
+                    Stat("Notas", formatK(data.garage.bucks))
                     Stat("Vitórias", if (report.races == 0) "—" else "${(report.winRate * 100).toInt()}%",
                         if (report.winRate >= 0.55) Good else if (report.races > 0 && report.winRate < 0.4) F1Red else Warn)
                 }

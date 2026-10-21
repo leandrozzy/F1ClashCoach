@@ -59,7 +59,11 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
             Stat("Série", g.series.toString()); Stat("Troféus", g.trophies.toString())
             Stat("Moedas", formatK(g.coins)); Stat("Bucks", formatK(g.bucks))
         }
-        Text("Toque nos números para editar", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(horizontal = 12.dp))
+        g.carTotals?.let { t ->
+            Text("Pontuação ${g.teamScore} • VEL ${t.speed} CUR ${t.cornering} PU ${t.powerUnit} QUA ${t.qualifying} PIT ${t.pitStop}s OVT ${t.overtakeMode}",
+                fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
+        }
+        Text("Com o Coach ligado, abra Equipe → Pilotos e Carros no jogo e role as listas: tudo é preenchido sozinho.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(horizontal = 12.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) {
                 Text("📷 Ler prints", fontSize = 13.sp)
@@ -108,11 +112,11 @@ private fun EmptyHint() {
 private fun PartRow(p: Part, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text((if (p.equipped) "✅ " else "") + p.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text((if (p.equipped) "✅ " else "") + p.name + (if (p.featured) " ⭐" else ""), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text("Nv ${p.progress.level} • ${p.rarity.label}", fontSize = 12.sp, color = Muted)
         }
         val s = p.stats
-        Text("VEL ${s.speed}  CUR ${s.cornering}  PU ${s.powerUnit}  QUA ${s.qualifying}  PIT ${s.pitStop}s  OVT ${s.overtakeMode}", fontSize = 12.sp)
+        if (s.total > 0) Text("VEL ${s.speed}  CUR ${s.cornering}  PU ${s.powerUnit}  QUA ${s.qualifying}  PIT ${s.pitStop}s  OVT ${s.overtakeMode}", fontSize = 12.sp)
         CardsBar(p.progress)
     }
 }
@@ -121,11 +125,11 @@ private fun PartRow(p: Part, onClick: () -> Unit) {
 private fun DriverRow(d: Driver, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text((if (d.equipped) "✅ " else "") + d.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text((if (d.equipped) "✅ " else "") + d.name + (if (d.legendary) " 👑" else "") + (if (d.featured) " ⭐" else ""), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text("Nv ${d.progress.level} • ${d.rarity.label}", fontSize = 12.sp, color = Muted)
         }
         val s = d.stats
-        Text("ULT ${s.overtaking}  DEF ${s.defending}  QUA ${s.qualifying}  LAR ${s.raceStart}  PNEU ${s.tyreManagement}", fontSize = 12.sp)
+        if (s.total > 0) Text("ULT ${s.overtaking}  DEF ${s.defending}  QUA ${s.qualifying}  LAR ${s.raceStart}  PNEU ${s.tyreManagement}", fontSize = 12.sp)
         CardsBar(d.progress)
     }
 }

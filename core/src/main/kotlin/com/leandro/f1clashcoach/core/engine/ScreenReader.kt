@@ -17,7 +17,9 @@ data class TextLine(val text: String, val left: Float = 0f, val top: Float = 0f,
 
 enum class GameScreen(val label: String) {
     RACE("Corrida"), QUALIFYING("Classificação"), PRE_RACE("Pré-corrida"), RACE_RESULT("Resultado"),
-    PARTS("Peças"), DRIVERS("Pilotos"), UPGRADE("Upgrade"), STORE("Loja"), EVENT("Evento / modo de jogo"), MENU("Menu"), UNKNOWN("Desconhecida")
+    PARTS("Peças"), DRIVERS("Pilotos"), UPGRADE("Upgrade"), STORE("Loja"), EVENT("Evento / modo de jogo"), MENU("Menu"),
+    HOME("Início"), RACE_MENU("Escolha de corrida"), GP("Grand Prix"), OBJECTIVES("Objetivos"), TEAM_DRIVERS("Equipe • Pilotos"),
+    TEAM_CARS("Equipe • Carros"), BOOSTERS("Reforços"), CLUB("Clube"), PIT_PASS("Pit Pass"), UNKNOWN("Desconhecida")
 }
 
 data class ParsedScreen(
@@ -45,6 +47,8 @@ data class ParsedScreen(
     val title: String? = null,
     /** Tempo restante lido de um timer ("2d 4h", "3h 20m"), em ms. */
     val timeLeftMs: Long? = null,
+    /** Dados das telas de menu reais (Equipe, Objetivos, GP, Loja, Clube…). */
+    val game: GameRead? = null,
     val rawText: String = "",
 ) {
     fun toSnapshot(): RaceSnapshot {
@@ -99,6 +103,7 @@ object ScreenReader {
     private val TM_RE = statRe("TYRE MANAGEMENT", "TIRE MANAGEMENT", "GESTÃO DE PNEUS", "GESTAO DE PNEUS", "PNEUS")
 
     fun classify(lines: List<TextLine>): GameScreen {
+        GameReader.classify(lines.joinToString(" ") { Txt.compact(it.text) })?.let { return it }
         val text = lines.joinToString("\n") { it.text.uppercase() }
         if (LAP_RE.containsMatchIn(text) || LAP_ALT_RE.containsMatchIn(text)) return GameScreen.RACE
         val scores = SCREEN_KEYWORDS.mapValues { (_, kws) -> kws.count { text.contains(it) } }
@@ -106,7 +111,7 @@ object ScreenReader {
         return if (best.value >= 2 || (best.value == 1 && best.key == GameScreen.RACE_RESULT)) best.key else GameScreen.UNKNOWN
     }
 
-    fun parse(lines: List<TextLine>): ParsedScreen {
+    fun parse(lines: List<TextLine>, lastSlot: PartSlot? = null): ParsedScreen {
         val sorted = lines.sortedWith(compareBy({ it.top }, { it.left }))
         val text = sorted.joinToString("\n") { it.text.uppercase() }
         val screen = classify(sorted)
@@ -190,31 +195,20 @@ object ScreenReader {
             cards = cards, slot = slot, carStats = carStats, driverStats = driverStats, itemName = itemName,
             coins = COINS_RE.find(text)?.groupValues?.get(1)?.replace(".", "")?.replace(",", "")?.toLongOrNull(),
             mode = mode, title = title, timeLeftMs = parseDuration(text),
+            game = if (screen in GAME_SCREENS) GameReader.read(lines, screen, lastSlot) else null,
             rawText = text,
         )
     }
 
+    private val GAME_SCREENS = setOf(
+        GameScreen.HOME, GameScreen.RACE_MENU, GameScreen.GP, GameScreen.OBJECTIVES, GameScreen.TEAM_DRIVERS,
+        GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE,
+    )
+
     private val TIMER_RE = Regex("""\b(\d{1,3})\s*(D|DIAS?|DAYS?|H|HRS?|HORAS?|M|MIN|MINS?)\b""")
 
-    /** Lê o primeiro timer da tela ("2D 4H", "3h 20m", "5 dias") e devolve em ms. */
-    fun parseDuration(upperText: String): Long? {
-        val matches = TIMER_RE.findAll(upperText).toList()
-        if (matches.isEmpty()) return null
-        // Agrupa tokens vizinhos (ex.: "2D 4H") a partir do primeiro.
-        var total = 0L
-        var lastEnd = -1
-        for (m in matches) {
-            if (lastEnd >= 0 && m.range.first - lastEnd > 2) break
-            val n = m.groupValues[1].toLong()
-            total += when (m.groupValues[2].first()) {
-                'D' -> n * 86_400_000L
-                'H' -> n * 3_600_000L
-                else -> n * 60_000L
-            }
-            lastEnd = m.range.last + 1
-        }
-        return total.takeIf { it > 0 }
-    }
+    /** Lê o timer da tela ("2D 4H", "Termina em 13d15h06m") e devolve em ms. */
+    fun parseDuration(upperText: String): Long? = Txt.duration(upperText)
 
     private fun isLabel(t: String): Boolean =
         SCREEN_KEYWORDS.values.flatten().any { t.contains(it) } ||

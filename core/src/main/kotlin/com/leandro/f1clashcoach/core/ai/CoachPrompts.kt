@@ -6,6 +6,8 @@ import com.leandro.f1clashcoach.core.engine.SetupOptimizer
 import com.leandro.f1clashcoach.core.engine.UpgradePlanner
 import com.leandro.f1clashcoach.core.model.ActiveEvent
 import com.leandro.f1clashcoach.core.model.Garage
+import com.leandro.f1clashcoach.core.model.GrandPrixState
+import com.leandro.f1clashcoach.core.model.Objective
 import com.leandro.f1clashcoach.core.model.RaceRecord
 import com.leandro.f1clashcoach.core.model.Track
 import com.leandro.f1clashcoach.core.model.TrackCatalog
@@ -41,19 +43,37 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
         focusTrack: Track? = null,
         events: List<ActiveEvent> = emptyList(),
         now: Long = System.currentTimeMillis(),
+        objectives: List<Objective> = emptyList(),
+        gp: GrandPrixState? = null,
     ): String {
         val sb = StringBuilder()
         sb.appendLine("## Conta")
-        sb.appendLine("Série: ${garage.series} | Troféus: ${garage.trophies} | Moedas: ${garage.coins} | Bucks: ${garage.bucks}")
-        sb.appendLine("## Peças (slot | nome | raridade | nível | cartas | custo | Speed/Cornering/PU/Quali/Pit/OVT | equipada)")
+        sb.appendLine("Série: ${garage.series} | Pontuação da equipe: ${garage.teamScore} | Moedas: ${garage.coins} | Notas (bucks): ${garage.bucks}" +
+            (garage.clubName.takeIf { it.isNotBlank() }?.let { " | Clube: $it" } ?: ""))
+        garage.carTotals?.let { t ->
+            sb.appendLine("Carro equipado (totais): Velocidade ${t.speed}, Curvas ${t.cornering}, Unidade de Potência ${t.powerUnit}, Qualificação ${t.qualifying}, Pit stop ${t.pitStop}s, Modo de Ultrapassagem ${t.overtakeMode}")
+        }
+        if (garage.featuredAssets.isNotEmpty()) sb.appendLine("Recursos em destaque da semana: ${garage.featuredAssets.joinToString()}")
+        if (garage.boosters.isNotEmpty()) sb.appendLine("Reforços no estoque: ${garage.boosters.entries.sortedByDescending { it.value }.take(12).joinToString { "${it.key} x${it.value}" }}")
+        gp?.let { g ->
+            sb.appendLine("## Grand Prix atual: ${g.name} | ${g.round ?: ""} | termina em ${g.roundEndsAt?.let { DailyBriefing.formatLeft(it - now) } ?: "?"} | " +
+                "pontuação recomendada ${g.recommendedScore ?: "?"} | entrada ${g.entryFee ?: "?"} | lendários ${when (g.legendaryAllowed) { true -> "permitidos"; false -> "PROIBIDOS"; null -> "?" }} | " +
+                "corridas ${g.racesPlayed ?: "?"}/${g.racesTotal ?: "?"} | meus pontos ${g.myPoints ?: "?"} | bônus destaque ${g.featuredBoostPct ?: "?"}%")
+        }
+        val pend = objectives.filter { !it.done && (it.endsAt == null || it.endsAt > now) }
+        if (pend.isNotEmpty()) {
+            sb.appendLine("## Objetivos pendentes no jogo")
+            pend.forEach { sb.appendLine("- ${if (it.weekly) "Semanal" else "Diário"}: ${it.text} (${it.progress}/${it.target})") }
+        }
+        sb.appendLine("## Peças (slot | nome | raridade | nível | cartas | custo | Speed/Cornering/PU/Quali/Pit/OVT | equipada) — atributos 0 = não lidos")
         garage.parts.sortedBy { it.slot.ordinal }.forEach { p ->
             val s = p.stats
             sb.appendLine("${p.slot.label} | ${p.name} | ${p.rarity.label} | ${p.progress.level} | ${p.progress.cardsOwned}/${p.progress.cardsNeeded} | ${p.progress.upgradeCoins} | ${s.speed}/${s.cornering}/${s.powerUnit}/${s.qualifying}/${s.pitStop}/${s.overtakeMode} | ${if (p.equipped) "sim" else "não"}")
         }
-        sb.appendLine("## Pilotos (nome | raridade | nível | cartas | custo | OVT/DEF/QUALI/LARG/PNEU | escalado)")
-        garage.drivers.forEach { d ->
+        sb.appendLine("## Pilotos (nome | raridade | nível | cartas | custo | OVT/DEF/QUALI/LARG/PNEU | escalado) — 👑 lendário, ⭐ destaque")
+        garage.drivers.sortedByDescending { it.equipped }.forEach { d ->
             val s = d.stats
-            sb.appendLine("${d.name} | ${d.rarity.label} | ${d.progress.level} | ${d.progress.cardsOwned}/${d.progress.cardsNeeded} | ${d.progress.upgradeCoins} | ${s.overtaking}/${s.defending}/${s.qualifying}/${s.raceStart}/${s.tyreManagement} | ${if (d.equipped) "sim" else "não"}")
+            sb.appendLine("${d.name}${if (d.legendary) " 👑" else ""}${if (d.featured) " ⭐" else ""} | ${d.rarity.label} | ${d.progress.level} | ${d.progress.cardsOwned}/${d.progress.cardsNeeded} | ${d.progress.upgradeCoins} | ${s.overtaking}/${s.defending}/${s.qualifying}/${s.raceStart}/${s.tyreManagement} | ${if (d.equipped) "sim" else "não"}")
         }
         val report = HistoryAnalyzer.analyze(history)
         sb.appendLine("## Histórico")
