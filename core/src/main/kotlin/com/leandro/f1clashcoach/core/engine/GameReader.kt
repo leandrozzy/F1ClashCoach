@@ -147,6 +147,8 @@ data class GpRead(
 )
 
 /** Tudo que dá para extrair das telas de menu do F1 Clash (layout vertical, PT-BR ou EN). */
+data class ClubMemberRead(val name: String, val role: String, val rep: Long)
+
 data class GameRead(
     val screen: GameScreen? = null,
     val coins: Long? = null,
@@ -171,6 +173,13 @@ data class GameRead(
     val clubLeagueName: String? = null,
     val clubLeagueLeftMs: Long? = null,
     val freeCrateReady: Boolean = false,
+    /** Tempo até o próximo caixote grátis (loja). */
+    val freeCrateLeftMs: Long? = null,
+    /** Membros lidos na aba Membros do clube. */
+    val clubMembers: List<ClubMemberRead> = emptyList(),
+    val clubMemberCount: Int? = null,
+    /** Texto de regras/descrição do clube, quando aparece na tela. */
+    val clubRules: String? = null,
     val series: Int? = null,
     /** Loadout limitado de GP: não representa a equipe principal. */
     val restricted: Boolean = false,
@@ -276,7 +285,8 @@ object GameReader {
             }
             GameScreen.OBJECTIVES -> r = readObjectives(ls, r)
             GameScreen.GP, GameScreen.RACE_MENU -> r = r.copy(gp = readGp(ls, all))
-            GameScreen.STORE -> r = r.copy(featured = featured(ls))
+            GameScreen.STORE -> r = r.copy(featured = featured(ls), freeCrateLeftMs = ls.firstOrNull { Txt.has(it.c.replace('Z', 'A'), "CAIXOTEGRATIS") }
+                ?.let { lbl -> ls.filter { it.cy > lbl.cy && it.cy - lbl.cy < 0.04f }.firstNotNullOfOrNull { Txt.duration(it.t.text) } })
             GameScreen.BOOSTERS -> r = r.copy(boosters = boosters(ls))
             GameScreen.CLUB -> r = readClub(ls, all, r)
             GameScreen.RACE -> r = r.copy(race = readRace(ls))
@@ -714,6 +724,42 @@ object GameReader {
         val rep = repLabel?.let { l -> ls.filter { it.cy > l.cy && it.cy - l.cy < 0.04f && abs(it.cx - l.cx) < 0.1f }.firstNotNullOfOrNull { Txt.bigNumber(it.t.text) } }
         val league = ls.firstOrNull { Regex("""EXIBICAO\d{1,3}""").containsMatchIn(it.c) }
         val leagueLeft = league?.let { lg -> ls.filter { it.cy >= lg.cy && it.cy - lg.cy < 0.04f }.firstNotNullOfOrNull { Txt.duration(it.t.text) } }
-        return base.copy(clubName = name, clubRep = rep, clubLeagueName = league?.t?.text?.trim(), clubLeagueLeftMs = leagueLeft)
+        val count = ls.firstNotNullOfOrNull { Regex("""(\d{1,2})\s*/\s*50$""").find(it.t.text.trim())?.groupValues?.get(1)?.toIntOrNull() }
+            ?.let { if (it > 50) it % 100 else it }
+        return base.copy(clubName = name, clubRep = rep, clubLeagueName = league?.t?.text?.trim(), clubLeagueLeftMs = leagueLeft,
+            clubMembers = if (league == null) readClubMembers(ls) else emptyList(), clubMemberCount = count?.takeIf { league == null }, clubRules = readClubRules(ls))
+    }
+
+    private val ROLES = linkedMapOf("VICECAPITAO" to "Vice-Capitão", "PRESIDENTE" to "Presidente", "CAPITAO" to "Capitão", "MEMBRO" to "Membro")
+
+    private fun roleOf(l: L): String? {
+        val c = l.c.replace('Z', 'A')
+        if (c.length > 14) return null
+        return ROLES.entries.firstOrNull { (k, _) -> c == k || (c.length >= k.length - 1 && Txt.lev(c, k, 2) <= (if (k.length >= 7) 2 else 1)) }?.value
+    }
+
+    /** Aba Membros: nome com o cargo logo abaixo e a reputação à direita, na mesma linha do nome. */
+    private fun readClubMembers(ls: List<L>): List<ClubMemberRead> {
+        val header = ls.firstOrNull { Txt.has(it.c, "RANKING") } ?: return emptyList()
+        val out = ArrayList<ClubMemberRead>()
+        for (role in ls.filter { it.cy > header.cy && it.cx in 0.2f..0.6f && it.t.left in 0.2f..0.35f }) {
+            val r = roleOf(role) ?: continue
+            val name = ls.filter { it !== role && it.t.left in 0.2f..0.35f && it.cy < role.cy && role.cy - it.cy < 0.035f && roleOf(it) == null }
+                .maxByOrNull { it.cy } ?: continue
+            val rep = ls.filter { it.cx > 0.7f && abs(it.cy - name.cy) < 0.02f }
+                .firstNotNullOfOrNull { l -> Regex("""^[\d.,]+$""").find(l.t.text.trim())?.let { Txt.bigNumber(it.value) } } ?: continue
+            out += ClubMemberRead(name.t.text.trim(), r, rep)
+        }
+        return out
+    }
+
+    /** Regras do clube: frases da descrição que falam de mínimo, reputação, inatividade ou expulsão. */
+    private fun readClubRules(ls: List<L>): String? {
+        val kws = listOf("REGRA", "MINIMO", "OBRIGATORIO", "INATIV", "EXPULS", "REMOVID", "BANID", "SEMANA", "DIAS")
+        val hits = ls.filter { l -> l.t.text.length >= 25 && l.t.text.any { it.isLowerCase() } && kws.any { Txt.has(l.c.replace('Z', 'A'), it) || l.c.contains(it) } }
+        if (hits.isEmpty()) return null
+        val first = hits.minOf { it.cy }
+        val last = hits.maxOf { it.cy }
+        return ls.filter { it.cy in (first - 0.005f)..(last + 0.005f) && it.t.text.length >= 3 }.joinToString(" ") { it.t.text.trim() }.take(600)
     }
 }

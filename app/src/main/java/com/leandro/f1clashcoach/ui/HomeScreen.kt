@@ -64,6 +64,7 @@ fun HomeScreen(
     navigate: (Tab) -> Unit,
     onOpenUrl: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenClub: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val data by vm.store.data.collectAsState()
@@ -205,6 +206,49 @@ fun HomeScreen(
             }
         }
 
+        // ---------- Onde gastar moedas ----------
+        item {
+            val up = remember(data.garage) { com.leandro.f1clashcoach.core.engine.UpgradePlanner.plan(data.garage) }
+            SectionCard("💰 Onde gastar moedas") {
+                if (up.doNow.isEmpty() && up.collectCards.isEmpty()) Text("Abra Equipe › Carros e Pilotos no jogo para eu ler níveis, cartas e custos.", fontSize = 12.sp, color = Muted)
+                up.doNow.take(4).forEachIndexed { i, a ->
+                    ActionRow("${i + 1}", "Evoluir ${a.name}", "${a.kind} nv ${a.level} • ${a.reason}", Good, onClick = { navigate(Tab.EVOLVE) })
+                }
+                if (up.doNow.isNotEmpty()) Text("Sobram ${formatK(up.coinsLeft)} moedas depois disso.", fontSize = 12.sp, color = Muted)
+                if (up.collectCards.isNotEmpty()) {
+                    Text("Juntar cartas de (caixotes, loja, clube):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                    up.collectCards.take(3).forEach { a -> Text("• ${a.name}: ${a.reason}", fontSize = 12.sp, color = Muted) }
+                }
+            }
+        }
+
+        // ---------- Grand Prix da semana ----------
+        item {
+            val gpPlan = remember(data.garage, data.gp) { com.leandro.f1clashcoach.core.engine.GpPlanner.plan(data.garage, data.gp) }
+            SectionCard("🏆 Grand Prix da semana") {
+                data.gp?.let { gp ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Pill(gp.name, Sky)
+                        gp.roundEndsAt?.let { Pill("⏱ " + DailyBriefing.formatLeft(it - now), if (it - now < 86_400_000L) F1Red else Warn) }
+                    }
+                }
+                gpPlan.lines.forEach { Text(it, fontSize = 13.sp, lineHeight = 18.sp) }
+            }
+        }
+
+        // ---------- Clube ----------
+        item {
+            val clubRep = remember(data.club, data.garage.playerName) { com.leandro.f1clashcoach.core.engine.ClubManager.evaluate(data.club, data.garage.playerName, now) }
+            SectionCard("👥 Clube ${data.garage.clubName}".trim(), action = { TextButton(onClick = onOpenClub) { Text("Abrir") } }) {
+                if (data.club.members.isEmpty()) ActionRow("👥", "Leia os membros", "Abra Clube › Membros no jogo e role a lista. Eu aviso quem excluir e quando.", Sky, onClick = onOpenClub)
+                else {
+                    Text("${data.club.memberCount ?: data.club.members.size}/50 membros • ${clubRep.kicks.size} para excluir/conversar", fontSize = 13.sp)
+                    clubRep.kicks.take(3).forEach { k -> ActionRow(if (k.urgency == 2) "🔴" else if (k.urgency == 1) "🟡" else "💬", k.name, k.reason, if (k.urgency == 2) F1Red else Warn, onClick = onOpenClub) }
+                    Text("⏰ ${clubRep.whenToAct}", fontSize = 12.sp, color = Muted)
+                }
+            }
+        }
+
         // ---------- Briefing da IA (automático) ----------
         item {
             SectionCard("🤖 Briefing do Coach", action = {
@@ -287,6 +331,12 @@ fun HomeScreen(
                     ResultStrip(last)
                     Text("${report.races} corridas • ${(report.winRate * 100).toInt()}% vitórias • últimas 20: ${(report.recentWinRate * 100).toInt()}%", fontSize = 12.sp, color = Muted)
                     report.insights.take(2).forEach { Text("💡 $it", fontSize = 12.sp) }
+                    remember(data.races) { com.leandro.f1clashcoach.core.engine.TrackPlaybook.build(data.races) }.filter { it.bestStrategy != null }.take(4).forEach { tp ->
+                        Text("🏁 ${tp.trackName}: ${tp.wins}/${tp.races} • melhor ${tp.bestStrategy} (${tp.bestStrategyWins}/${tp.bestStrategyRaces})", fontSize = 12.sp)
+                    }
+                    data.races.filter { it.review.isNotBlank() }.maxByOrNull { it.timestamp }?.let { r ->
+                        Text("🔎 Última derrota: ${r.review.take(280)}", fontSize = 12.sp, color = Muted)
+                    }
                 }
             }
         }

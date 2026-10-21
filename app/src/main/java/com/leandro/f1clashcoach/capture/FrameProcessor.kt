@@ -168,7 +168,8 @@ class FrameProcessor(
             GameScreen.GP, GameScreen.RACE_MENU -> g.gp?.let { gp ->
                 val items = DailyBriefing.build(d.garage, d.races, d.events, d.tyreObservations, d.lastMetaTime, now, d.objectives, d.gp)
                     .filter { it.icon in setOf("🏆", "⛔", "⭐") }
-                val advice = items.joinToString("\n\n") { "${it.icon} ${it.title}\n${it.detail}" }
+                val advice = (com.leandro.f1clashcoach.core.engine.GpPlanner.plan(d.garage, d.gp).lines.joinToString("\n") + "\n\n" +
+                    items.joinToString("\n\n") { "${it.icon} ${it.title}\n${it.detail}" }).trim()
                 onEventScreen(GameMode.GRAND_PRIX, listOfNotNull(gp.name, gp.round).joinToString(" — "), gp.timeLeftMs, advice)
             }
             GameScreen.PRE_RACE_TYRES -> if (g.tyreLapTimes.isNotEmpty()) {
@@ -192,12 +193,17 @@ class FrameProcessor(
             }
             GameScreen.PRE_RACE -> g.rivalTeamScore?.let { rival ->
                 val mine = d.garage.teamScore
-                val diff = mine - rival
-                overlay.showMessage(
-                    "🆚 Rival: pontuação $rival • você $mine (${if (diff >= 0) "+" else ""}$diff)\n" +
-                        when { diff >= 40 -> "Você é favorito: largue com o plano padrão e controle o ritmo."; diff <= -40 -> "Rival mais forte: arrisque na estratégia (pneu diferente/uma parada a menos) e use o Overtake cedo."; else -> "Duelo equilibrado: classificação e pit stop decidem." },
-                    pin = false,
-                )
+                lastRivalScore = rival
+                if (mine > 0) {
+                    val s = com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }
+                    val odds = com.leandro.f1clashcoach.core.engine.DuelOddsCalc.estimate(mine, rival, d.races, s)
+                    overlay.showMessage(
+                        "🆚 ${odds.winPct}% de chance • ${odds.verdict}\nVocê $mine x rival $rival" +
+                            (odds.expectedFlags?.let { " • ${if (it >= 0) "+" else ""}${"%.1f".format(it)} 🏳 esperadas" } ?: "") +
+                            "\n" + odds.tips.take(2).joinToString("\n") { "• $it" },
+                        pin = false,
+                    )
+                } else overlay.showMessage("🆚 Rival: pontuação $rival. Abra Equipe › Carros no jogo para eu saber a sua e calcular a chance.", pin = false)
             }
             GameScreen.DUEL_SERIES -> {
                 val prog = com.leandro.f1clashcoach.core.engine.Progression.plan(d.garage, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.races, d.flags)
@@ -214,7 +220,10 @@ class FrameProcessor(
                 if (g.seasonName != null && g.seasonLeftMs != null) app.store.upsertEvent(GameMode.SEASON, "Pit Pass ${g.seasonName}", g.seasonLeftMs)
                 if (g.freeCrateReady) overlay.showMessage("🎁 Caixote grátis disponível — abra antes de correr.", pin = false)
             }
-            GameScreen.CLUB -> if (g.clubLeagueName != null) app.store.upsertEvent(GameMode.CLUB, "Liga de clubes ${g.clubLeagueName}", g.clubLeagueLeftMs)
+            GameScreen.CLUB -> {
+                if (g.clubLeagueName != null) app.store.upsertEvent(GameMode.CLUB, "Liga de clubes ${g.clubLeagueName}", g.clubLeagueLeftMs)
+                if (g.clubMembers.isNotEmpty()) onClubMembers()
+            }
             GameScreen.OBJECTIVES -> {
                 val pend = d.objectives.filter { !it.done }.sortedBy { it.weekly }
                 overlay.showMessage(
@@ -232,7 +241,15 @@ class FrameProcessor(
                     pin = false,
                 )
             }
-            GameScreen.STORE -> if (d.garage.featuredAssets.isNotEmpty()) {
+            GameScreen.STORE -> if (g.featured.isNotEmpty() && com.leandro.f1clashcoach.core.engine.StoreWatch.matches(g.featured, com.leandro.f1clashcoach.core.engine.StoreWatch.wishlist(d.garage)).isNotEmpty()) {
+                val hit = com.leandro.f1clashcoach.core.engine.StoreWatch.matches(g.featured, com.leandro.f1clashcoach.core.engine.StoreWatch.wishlist(d.garage))
+                overlay.showMessage("🛒 Na loja tem carta que você precisa: ${hit.take(4).joinToString()}\nVale gastar moedas/notas aqui antes de outras ofertas.", pin = false)
+                val day = java.time.LocalDate.now().toString()
+                if (storeNotified != day + hit.joinToString()) {
+                    storeNotified = day + hit.joinToString()
+                    com.leandro.f1clashcoach.notify.Notifier.show(app, 4100, "🛒 Carta que você precisa na loja", hit.take(4).joinToString())
+                }
+            } else if (d.garage.featuredAssets.isNotEmpty()) {
                 val mine = (d.garage.drivers.filter { it.featured }.map { it.name } + d.garage.parts.filter { it.featured }.map { it.name })
                 overlay.showMessage(
                     "⭐ Destaques da semana: ${d.garage.featuredAssets.take(6).joinToString()}" +
@@ -325,6 +342,10 @@ class FrameProcessor(
                 append("Setup:\n"); setup.changes.take(4).forEach { append("• ").append(it).append('\n') }
             } else append("Setup atual já é o melhor que você tem.\n")
             plan?.let { append("Estratégia ($laps v): ").append(it.summary()) }
+            com.leandro.f1clashcoach.core.engine.TrackPlaybook.forTrack(data.races, track.id)?.let { tp ->
+                append("\nSeu histórico aqui: ${tp.wins}/${tp.races} vitórias")
+                tp.bestStrategy?.let { bs -> append(" • melhor: $bs (${tp.bestStrategyWins}/${tp.bestStrategyRaces})") }
+            }
         }
         overlay.showMessage(msg.trim(), pin = false)
         LiveState.event("Pista detectada: ${track.name}")
@@ -369,9 +390,12 @@ class FrameProcessor(
             series = p.series ?: app.store.data.value.garage.series,
             gridPositions = lastGrid, finishPositions = p.positions.take(2), won = won, weather = lastWeather,
             strategy = usedTyres.joinToString("→") { it.short }, source = "auto",
+            myScore = app.store.data.value.garage.teamScore.takeIf { it > 0 }, rivalScore = lastRivalScore,
             notes = duel?.let { dd -> "Pontos ${dd.myPoints ?: "?"} x ${dd.rivalPoints ?: "?"}" + if (dd.fastestLap) " • volta mais rápida" else "" } ?: "",
         )
         app.store.addRace(record)
+        lastRivalScore = null
+        if (won == false) reviewRace(record, duel)
         usedTyres.clear(); lastGrid = emptyList()
         val stars = app.store.data.value.let { d -> com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }?.prizeStars }
         val txt = if (won == true) "🏆 Vitória registrada!" + (stars?.let { " +★$it para o clube" } ?: "") + (duel?.flagsAfter?.let { "\n🏳 Bandeiras: $it" } ?: "") else debrief(record)
@@ -406,6 +430,58 @@ class FrameProcessor(
             lastScanName = name
             overlay.showMessage("✅ Garagem: $name atualizado", pin = false)
             LiveState.event("Garagem atualizada: $name")
+        }
+    }
+
+    @Volatile private var lastRivalScore: Int? = null
+    private var storeNotified = ""
+
+    /** Aba Membros lida: avalia quem excluir e avisa (painel + notificação, 1x por dia por pessoa). */
+    private fun onClubMembers() {
+        val d = app.store.data.value
+        val now = System.currentTimeMillis()
+        val rep = com.leandro.f1clashcoach.core.engine.ClubManager.evaluate(d.club, d.garage.playerName, now)
+        if (rep.kicks.isEmpty()) {
+            overlay.showMessage("👥 Clube: ${rep.summary.first()}\n✅ Ninguém para excluir agora.", pin = false)
+            return
+        }
+        overlay.showMessage("👥 Clube • quem excluir\n" + rep.kicks.take(5).joinToString("\n") { k ->
+            (if (k.urgency == 2) "🔴 " else if (k.urgency == 1) "🟡 " else "⚪ ") + "${k.name} (${k.role}): ${k.reason}"
+        } + "\n⏰ ${rep.whenToAct}", pin = false)
+        val day = java.time.LocalDate.now().toString()
+        val fresh = rep.kicks.filter { it.urgency >= 1 && d.club.notified[it.name] != day }
+        if (fresh.isNotEmpty()) {
+            com.leandro.f1clashcoach.notify.Notifier.show(app, 4200, "👥 Excluir do clube: ${fresh.size}",
+                fresh.take(5).joinToString("\n") { "${it.name}: ${it.reason}" } + "\n" + rep.whenToAct)
+            app.store.update { it.copy(club = it.club.copy(notified = it.club.notified + fresh.associate { k -> k.name to day })) }
+        }
+    }
+
+    /** Derrota: a IA explica o que perdeu e o que mudar (sozinha, sem você pedir). */
+    private fun reviewRace(r: RaceRecord, duel: com.leandro.f1clashcoach.core.engine.DuelResult?) {
+        if (!com.leandro.f1clashcoach.ai.AiClient.hasAnyKey(app)) return
+        val hud = lastRaceHud
+        val trackName = currentTrack?.name ?: r.trackId
+        scope.launch {
+            runCatching {
+                val d = app.store.data.value
+                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags)
+                val facts = buildString {
+                    append("Corrida perdida em $trackName, série ${r.series}. ")
+                    append("Pneus usados: ${r.strategy.ifBlank { "?" }}. Clima: ${r.weather.label}. ")
+                    r.myScore?.let { append("Minha pontuação $it x rival ${r.rivalScore ?: "?"}. ") }
+                    duel?.let { append("Placar ${it.myPoints ?: "?"} x ${it.rivalPoints ?: "?"}. ") }
+                    if (r.gridPositions.isNotEmpty()) append("Largada ${r.gridPositions}, chegada ${r.finishPositions}. ")
+                    hud?.let { h -> append("Último painel: " + h.drivers.joinToString { x -> "${x.code ?: "?"} ${x.tyre?.short ?: "?"} ${x.tyreLife ?: "?"}%" }) }
+                }
+                com.leandro.f1clashcoach.ai.AiHub(app).ask(AiRequest(CoachPrompts.system(), CoachPrompts.withContext(
+                    "Analise esta derrota em até 5 linhas curtas: o que mais pesou (largada, pneu, pit, chuva, pontuação) e 2 mudanças concretas para a próxima. $facts", ctx)))
+            }.onSuccess { a ->
+                app.store.setRaceReview(r.id, a.text)
+                app.store.addChat(ChatMessage(false, "🔎 Análise da derrota em $trackName:\n${a.text}"))
+                overlay.showMessage("🔎 Por que perdeu:\n${a.text}", pin = false)
+                com.leandro.f1clashcoach.notify.Notifier.show(app, 4300, "🔎 Análise da última derrota", a.text.take(300))
+            }.onFailure { Diag.log("Análise pós-corrida falhou: ${it.message}") }
         }
     }
 

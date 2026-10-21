@@ -67,7 +67,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     withContext(Dispatchers.IO) { ImageUtils.loadUri(app, uri)?.let { AiImage(ImageUtils.toJpeg(it), "image/jpeg") } }
                 }
                 val prompt = CoachPrompts.withContext(q, CoachPrompts.accountContext(d.garage, d.races, focusTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags))
-                val answer = advisor.ask(AiRequest(CoachPrompts.system(), prompt, history, image, webSearch))
+                val fullPrompt = if (q == CoachPrompts.CLUB_PLAN) prompt + "\n\n" + com.leandro.f1clashcoach.core.engine.ClubManager.aiContext(d.club, d.garage.playerName, System.currentTimeMillis()) else prompt
+                val answer = advisor.ask(AiRequest(CoachPrompts.system(), fullPrompt, history, image, webSearch))
                 store.addChat(ChatMessage(false, answer.text.ifBlank { "(sem resposta)" }, answer.sources.map { "${it.title}|${it.url}" }))
                 if (webSearch && q == CoachPrompts.WEEKLY_META) store.update { it.copy(lastMeta = answer.text, lastMetaTime = System.currentTimeMillis()) }
                 if (q == CoachPrompts.TARGET_META) store.update { it.copy(targetMeta = answer.text, targetMetaTime = System.currentTimeMillis()) }

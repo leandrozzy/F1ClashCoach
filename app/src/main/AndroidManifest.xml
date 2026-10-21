@@ -43,6 +43,8 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
+        <receiver android:name=".notify.ReminderReceiver" android:exported="false" />
+
         <!-- Leitura automática do jogo (igual ao OSM Coach): foto da tela pela acessibilidade, Android 11+. -->
         <service
             android:name=".capture.CoachAccessibilityService"

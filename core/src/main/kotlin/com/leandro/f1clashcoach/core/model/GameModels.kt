@@ -202,6 +202,11 @@ data class RaceRecord(
     val trophiesDelta: Int = 0,
     val notes: String = "",
     val source: String = "manual",
+    /** Pontuação da sua equipe e do rival no pareamento (para calibrar a chance de vitória). */
+    val myScore: Int? = null,
+    val rivalScore: Int? = null,
+    /** Análise pós-corrida feita pela IA. */
+    val review: String = "",
 )
 
 /** Observação real de desgaste de pneu (alimenta a calibração automática). */

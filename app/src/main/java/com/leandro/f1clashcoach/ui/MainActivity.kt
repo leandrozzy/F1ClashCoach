@@ -57,7 +57,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
     AI("Coach IA", Icons.Filled.AutoAwesome),
 }
 
-enum class SubScreen(val title: String) { NEWS("Notícias e guias"), SETTINGS("Ajustes") }
+enum class SubScreen(val title: String) { NEWS("Notícias e guias"), SETTINGS("Ajustes"), CLUB("Clube") }
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -74,12 +74,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val askNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private val notifLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { requestProjection() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleShare(intent)
+        // Avisos no celular (caixote, eventos acabando, clube): pede a permissão uma vez.
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
         setContent {
             CoachTheme {
                 AppRoot(vm, openAiTab = openAiTab.value, onAiTabOpened = { openAiTab.value = false },
@@ -164,6 +168,7 @@ fun AppRoot(
                     if (sub != null) IconButton(onClick = { sub = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
                 },
                 actions = {
+                    IconButton(onClick = { sub = SubScreen.CLUB }) { Text("👥", fontSize = 20.sp) }
                     IconButton(onClick = { sub = SubScreen.NEWS }) { Icon(Icons.Filled.Newspaper, "Notícias") }
                     IconButton(onClick = { sub = SubScreen.SETTINGS }) { Icon(Icons.Filled.Settings, "Ajustes") }
                 },
@@ -183,9 +188,10 @@ fun AppRoot(
         when (sub) {
             SubScreen.NEWS -> NewsScreen(vm, m, onOpenUrl, goAi)
             SubScreen.SETTINGS -> SettingsScreen(vm, m)
+            SubScreen.CLUB -> ClubScreen(vm, m, goAi)
             null -> when (tab) {
                 Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, { tab = it; sub = null }, onOpenUrl,
-                    onOpenSettings = { sub = SubScreen.SETTINGS })
+                    onOpenSettings = { sub = SubScreen.SETTINGS }, onOpenClub = { sub = SubScreen.CLUB })
                 Tab.GARAGE -> GarageScreen(vm, m)
                 Tab.RACE -> RaceScreen(vm, m, goAi)
                 Tab.EVOLVE -> EvolveScreen(vm, m, goAi)

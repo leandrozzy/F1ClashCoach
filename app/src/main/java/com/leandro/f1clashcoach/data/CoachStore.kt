@@ -57,6 +57,12 @@ data class CoachData(
     /** Meta para chegar à série alvo (pesquisa da IA). */
     val targetMeta: String = "",
     val targetMetaTime: Long = 0,
+    /** Clube: membros acompanhados, regras e liga. */
+    val club: com.leandro.f1clashcoach.core.engine.ClubState = com.leandro.f1clashcoach.core.engine.ClubState(),
+    /** Regra digitada pelo presidente (não sobrescrever com a lida da tela). */
+    val clubRulesManual: Boolean = false,
+    /** Quando o próximo caixote grátis fica pronto. */
+    val freeCrateAt: Long? = null,
 )
 
 /** Tudo que o Coach sabe fica neste arquivo JSON, no próprio aparelho. */
@@ -148,9 +154,18 @@ class CoachStore(context: Context) {
         update { d ->
             val r = GameSync.apply(d.garage, read, d.objectives, d.gp, now)
             changes = r.changes
+            var club = d.club
+            if (read.clubMembers.isNotEmpty()) club = com.leandro.f1clashcoach.core.engine.ClubManager.merge(club, read.clubMembers, now)
+            read.clubMemberCount?.let { club = club.copy(memberCount = it) }
+            read.clubRep?.let { club = club.copy(rep = it) }
+            read.clubLeagueName?.let { club = club.copy(leagueName = it) }
+            read.clubLeagueLeftMs?.let { club = club.copy(leagueEndsAt = now + it) }
+            if (read.clubRules != null && !d.clubRulesManual && read.clubRules != club.rules.text)
+                club = club.copy(rules = com.leandro.f1clashcoach.core.engine.ClubManager.parseRules(read.clubRules!!))
             d.copy(
                 garage = r.garage, objectives = r.objectives ?: d.objectives, gp = r.gp ?: d.gp,
                 series = d.series + r.series.associateBy { it.number }, flags = r.flags ?: d.flags,
+                club = club, freeCrateAt = read.freeCrateLeftMs?.let { now + it } ?: if (read.freeCrateReady) now else d.freeCrateAt,
             )
         }
         return changes
@@ -179,6 +194,14 @@ class CoachStore(context: Context) {
     fun removeEvent(id: String) = update { d -> d.copy(events = d.events.filterNot { it.id == id }) }
 
     fun setBriefing(text: String, sources: List<String>) = update { it.copy(aiBriefing = text, aiBriefingSources = sources, aiBriefingTime = System.currentTimeMillis()) }
+
+    // ---------- Clube ----------
+    fun setClubRules(text: String, minRep: Int?, days: Int?) = update { d ->
+        val parsed = com.leandro.f1clashcoach.core.engine.ClubManager.parseRules(text)
+        d.copy(club = d.club.copy(rules = parsed.copy(minRepWeek = minRep ?: parsed.minRepWeek, maxInactiveDays = days ?: parsed.maxInactiveDays)), clubRulesManual = true)
+    }
+
+    fun setRaceReview(id: String, review: String) = update { d -> d.copy(races = d.races.map { if (it.id == id) it.copy(review = review) else it }) }
 
     // ---------- Chat ----------
     fun addChat(m: ChatMessage) = update { d -> d.copy(chat = (d.chat + m).takeLast(200)) }
