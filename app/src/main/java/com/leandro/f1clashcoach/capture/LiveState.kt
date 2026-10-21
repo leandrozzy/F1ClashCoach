@@ -16,6 +16,21 @@ data class LiveStatus(
     val lastParsed: ParsedScreen? = null,
     val events: List<String> = emptyList(),
     val framesRead: Long = 0,
+    val race: RaceInfo = RaceInfo(),
+)
+
+/** O que foi lido da corrida atual/próxima (tudo do próprio jogo). */
+data class RaceInfo(
+    val trackName: String? = null,
+    val laps: Int? = null,
+    val lap: Int? = null,
+    val ranges: Map<com.leandro.f1clashcoach.core.model.Tyre, IntRange> = emptyMap(),
+    val lapTimes: Map<com.leandro.f1clashcoach.core.model.Tyre, Double> = emptyMap(),
+    val plans: List<String> = emptyList(),
+    val boosterLines: List<String> = emptyList(),
+    val pitLines: List<String> = emptyList(),
+    val odds: String? = null,
+    val updatedAt: Long = 0,
 )
 
 /** Estado ao vivo compartilhado entre o serviço de captura, o overlay e as telas do app. */

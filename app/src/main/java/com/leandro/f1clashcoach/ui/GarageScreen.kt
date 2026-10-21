@@ -72,6 +72,7 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
     var own by remember { mutableStateOf(Own.ALL) }
     var slotFilter by remember { mutableStateOf<PartSlot?>(null) }
     var rarityFilter by remember { mutableStateOf<Rarity?>(null) }
+    var group by remember { mutableIntStateOf(0) }
     var detail by remember { mutableStateOf<CollectionItem?>(null) }
     var editPart by remember { mutableStateOf<Part?>(null) }
     var editDriver by remember { mutableStateOf<Driver?>(null) }
@@ -87,7 +88,8 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
             Own.MINE -> i.owned
             Own.MISSING -> !i.owned
             Own.READY -> i.owned && i.cardsNeeded > 0 && i.cardsOwned >= i.cardsNeeded && (i.level ?: 0) < i.maxLevel
-        } && (slotFilter == null || i.slot == slotFilter) && (rarityFilter == null || i.rarity == rarityFilter)
+        } && (slotFilter == null || i.slot == slotFilter) && (rarityFilter == null || i.rarity == rarityFilter) &&
+            (tab == 1 || when (group) { 1 -> i.rarity == Rarity.LEGENDARY; 2 -> i.rarity == Rarity.SPECIAL; else -> i.rarity != Rarity.LEGENDARY && i.rarity != Rarity.SPECIAL })
     }.sortedWith(compareByDescending<CollectionItem> { it.equipped }.thenByDescending { it.owned }.thenBy { it.rarity.ordinal }.thenByDescending { it.total })
 
     LazyVerticalGrid(
@@ -138,17 +140,32 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
                         FilterPill("Todas", slotFilter == null, Sky) { slotFilter = null }
                         PartSlot.entries.forEach { sl -> FilterPill(sl.label, slotFilter == sl, Sky, icon = { PartIcon(sl, Color.White, 16.dp) }) { slotFilter = if (slotFilter == sl) null else sl } }
                     } else {
-                        listOf(Rarity.COMMON, Rarity.RARE, Rarity.EPIC, Rarity.LEGENDARY).forEach { r ->
-                            FilterPill(r.label, rarityFilter == r, rarityColor(r)) { rarityFilter = if (rarityFilter == r) null else r }
-                        }
+                        FilterPill("Normais ${drivers.count { it.owned && it.rarity != Rarity.LEGENDARY && it.rarity != Rarity.SPECIAL }}", group == 0, rarityColor(Rarity.COMMON)) { group = 0; rarityFilter = null }
+                        FilterPill("Lendários ${drivers.count { it.owned && it.rarity == Rarity.LEGENDARY }}", group == 1, rarityColor(Rarity.LEGENDARY)) { group = 1; rarityFilter = null }
+                        FilterPill("Especiais ${drivers.count { it.owned && it.rarity == Rarity.SPECIAL }}", group == 2, rarityColor(Rarity.SPECIAL)) { group = 2; rarityFilter = null }
                     }
                 }
-                Legend(listOf("Comum" to rarityColor(Rarity.COMMON), "Rara" to rarityColor(Rarity.RARE), "Épica" to rarityColor(Rarity.EPIC), "Lendária" to rarityColor(Rarity.LEGENDARY)))
+                if (tab == 0 && group == 0) Legend(listOf("Comum" to rarityColor(Rarity.COMMON), "Rara" to rarityColor(Rarity.RARE), "Épica" to rarityColor(Rarity.EPIC)))
                 if (source.none { it.owned }) Text("Abra Equipe › Pilotos e Carros no jogo com a leitura ligada e role a lista: suas cartas aparecem aqui coloridas. As cinzas são as que você ainda não tem.",
                     fontSize = 12.sp, color = Warn)
             }
         }
-        items(shown, key = { it.name + it.rarity.name + (it.slot?.name ?: "") }) { item -> AssetCard(item) { detail = item } }
+        val groups: List<Pair<String, List<CollectionItem>>> = if (tab == 0) when (group) {
+            0 -> listOf(Rarity.EPIC, Rarity.RARE, Rarity.COMMON, Rarity.UNKNOWN).map { r -> (if (r == Rarity.UNKNOWN) "Raridade a confirmar" else r.label + "s") to shown.filter { it.rarity == r } }
+            1 -> listOf("Pilotos lendários" to shown)
+            else -> shown.groupBy { it.edition.ifBlank { "Edições especiais" } }.toList()
+        } else PartSlot.entries.map { sl -> sl.label to shown.filter { it.slot == sl } }
+        groups.filter { it.second.isNotEmpty() }.forEach { (title, list) ->
+            item(span = { GridItemSpan(maxLineSpan) }, key = "h_$title") {
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val slot = PartSlot.entries.firstOrNull { it.label == title }
+                    if (slot != null) { PartIcon(slot, Color.White, 18.dp); Spacer(Modifier.width(6.dp)) }
+                    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+                    Text("${list.count { it.owned }}/${list.size}", fontSize = 12.sp, color = Muted)
+                }
+            }
+            items(list, key = { it.name + it.rarity.name + it.edition + (it.slot?.name ?: "") }) { item -> AssetCard(item) { detail = item } }
+        }
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

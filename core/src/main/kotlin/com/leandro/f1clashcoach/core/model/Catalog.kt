@@ -187,10 +187,13 @@ object Catalog {
             lvl?.let { driverCoinsToNext(def, it) } ?: def.coins.getOrNull(1), lvl?.let { driverCoinsToMax(def, it) },
             mine?.featured == true, mine?.equipped == true, mine?.name,
         )
-    } + g.drivers.filter { it.rarity == Rarity.SPECIAL }.map { d ->
+    } + g.drivers.filter { d ->
+        // especiais, fora da base (ex.: Herbert) ou raridade ainda não confirmada: mostra o que foi lido
+        d.rarity == Rarity.SPECIAL || findDrivers(d.name).isEmpty() || (d.rarity == Rarity.UNKNOWN && findDrivers(d.name).size > 1)
+    }.map { d ->
         // Edições especiais: fora do catálogo; mostra o que foi lido do jogo.
         CollectionItem(
-            d.name, true, Rarity.SPECIAL, null, 0, true, d.progress.level, maxOf(d.progress.level, 7),
+            d.name, true, d.rarity, null, 0, true, d.progress.level, maxOf(d.progress.level, 7),
             d.stats.total, d.nextLevelStats?.total, d.stats.total,
             d.progress.cardsOwned, d.progress.cardsNeeded, d.progress.upgradeCoins.toLong().takeIf { it > 0 }, null,
             d.featured, d.equipped, d.name, edition = d.edition,

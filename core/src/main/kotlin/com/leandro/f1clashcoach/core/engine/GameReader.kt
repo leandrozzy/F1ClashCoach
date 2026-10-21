@@ -401,9 +401,12 @@ object GameReader {
             }
         } else {
             // Aba Pilotos Lendários: nomes que só existem como lendários.
+            val leg = com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY
+            fun isLegend(n: String) = com.leandro.f1clashcoach.core.model.Catalog.findDrivers(n).let { d -> d.isNotEmpty() && d.all { it.rarity == leg } }
+            // na aba Lendários quase todos os nomes são lendários: os que não estão na base (ex.: Herbert) também são
+            val legendTab = tl.size >= 3 && tl.count { isLegend(it.name) } * 2 > tl.size
             tl = tl.map { t ->
-                val defs = com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name)
-                if (defs.isNotEmpty() && defs.all { it.rarity == com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY }) t.copy(rarity = com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY) else t
+                if (isLegend(t.name) || (legendTab && com.leandro.f1clashcoach.core.model.Catalog.findDrivers(t.name).isEmpty())) t.copy(rarity = leg) else t
             }
         }
         return base.copy(driverPair = pair, tiles = tl)

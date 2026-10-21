@@ -83,7 +83,12 @@ class FrameProcessor(
             Diag.lastScreenAt = System.currentTimeMillis()
         }
         try {
-            handle(withRarity(parsed, bitmap))
+            val rich = withRarity(parsed, bitmap)
+            // fotos das cartas para a garagem (recortadas da sua própria tela)
+            rich.game?.tiles?.takeIf { it.isNotEmpty() && (rich.screen == GameScreen.TEAM_DRIVERS || rich.screen == GameScreen.TEAM_CARS) }?.let { tl ->
+                runCatching { com.leandro.f1clashcoach.art.ArtStore.captureTiles(app, bitmap, tl, rich.screen == GameScreen.TEAM_CARS) }
+            }
+            handle(rich)
         } catch (e: Exception) {
             Diag.error("Tela ${parsed.screen.label}: " + (e.message ?: e.javaClass.simpleName))
         }
@@ -139,6 +144,7 @@ class FrameProcessor(
                         val d = hud.drivers[i]
                         liveWear.call(i, hud.lap, total, d.tyre, d.tyreLife, lastRanges, currentLapTimes, hud.weather != Weather.DRY)
                     }.map { c -> com.leandro.f1clashcoach.core.engine.Tip(if (c.urgent) com.leandro.f1clashcoach.core.engine.TipLevel.URGENT else if (c.pitAtEndOfLap != null) com.leandro.f1clashcoach.core.engine.TipLevel.IMPORTANT else com.leandro.f1clashcoach.core.engine.TipLevel.INFO, c.text, "") }
+                    LiveState.update { it.copy(race = it.race.copy(lap = hud.lap, laps = total, pitLines = pitTips.map { t -> t.title }, updatedAt = System.currentTimeMillis())) }
                     val modeled = setOf("CONSERVAR", "pare nesta volta", "pode ATACAR")
                     val tips = (pitTips + LiveCoach(WearModel(data.tyreObservations)).adviseHud(hud, currentTrack, tm, names)
                         .filter { t -> modeled.none { t.title.contains(it) } }).sortedBy { it.level.ordinal }
@@ -211,6 +217,8 @@ class FrameProcessor(
                 val plans = if (laps != null) com.leandro.f1clashcoach.core.engine.RangePlanner.plans(laps, lastRanges, currentLapTimes, pitLoss) else emptyList()
                 val stops = plans.firstOrNull()?.stops ?: 1
                 val boost = com.leandro.f1clashcoach.core.engine.Boosters.plan(d.garage.boosters, track, stops, lastWinPct, important = d.gp != null && System.currentTimeMillis() - (d.gp?.seenAt ?: 0) < 600_000)
+                LiveState.update { it.copy(race = it.race.copy(trackName = track?.name, laps = laps, ranges = lastRanges, lapTimes = currentLapTimes,
+                    plans = plans.map { pl -> pl.summary() }, boosterLines = boost.lines, updatedAt = System.currentTimeMillis())) }
                 overlay.showMessage(buildString {
                     append("🛞 ${track?.name ?: "Corrida"}")
                     append(if (laps != null) " • $laps voltas\n" else " • lendo voltas…\n")
@@ -228,6 +236,7 @@ class FrameProcessor(
                     val s = com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }
                     val odds = com.leandro.f1clashcoach.core.engine.DuelOddsCalc.estimate(mine, rival, d.races, s)
                     lastWinPct = if (odds.confident) odds.winPct else when (odds.verdict) { "Favorito" -> 75; "Equilibrado" -> 55; else -> 35 }
+                    LiveState.update { it.copy(race = RaceInfo(odds = odds.headline + " • você $mine x rival $rival", updatedAt = System.currentTimeMillis())) }
                     overlay.showMessage(
                         "🆚 ${odds.headline}\nVocê $mine x rival $rival" +
                             (odds.expectedFlags?.let { " • ${if (it >= 0) "+" else ""}${"%.1f".format(it)} 🏳 esperadas" } ?: "") +

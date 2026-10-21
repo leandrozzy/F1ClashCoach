@@ -20,6 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Settings
@@ -51,13 +53,13 @@ import com.leandro.f1clashcoach.capture.LiveState
 
 enum class Tab(val label: String, val icon: ImageVector) {
     HOME("Início", Icons.Filled.Home),
-    GARAGE("Garagem", Icons.Filled.Build),
-    RACE("Corrida", Icons.Filled.Flag),
+    GARAGE("Garagem", Icons.Filled.DirectionsCar),
     EVOLVE("Evoluir", Icons.AutoMirrored.Filled.TrendingUp),
-    AI("Coach IA", Icons.Filled.AutoAwesome),
+    RACE("Corrida", Icons.Filled.Flag),
+    CLUB("Clube", Icons.Filled.Groups),
 }
 
-enum class SubScreen(val title: String) { NEWS("Notícias e guias"), SETTINGS("Ajustes"), CLUB("Clube") }
+enum class SubScreen(val title: String) { NEWS("Notícias e guias"), SETTINGS("Ajustes"), AI("Coach IA") }
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -155,7 +157,7 @@ fun AppRoot(
     val toast by vm.toast.collectAsState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(openAiTab) { if (openAiTab) { tab = Tab.AI; sub = null; onAiTabOpened() } }
+    LaunchedEffect(openAiTab) { if (openAiTab) { sub = SubScreen.AI; onAiTabOpened() } }
     LaunchedEffect(toast) { toast?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show(); vm.consumeToast() } }
     BackHandler(enabled = sub != null || tab != Tab.HOME) { if (sub != null) sub = null else tab = Tab.HOME }
 
@@ -168,7 +170,6 @@ fun AppRoot(
                     if (sub != null) IconButton(onClick = { sub = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
                 },
                 actions = {
-                    IconButton(onClick = { sub = SubScreen.CLUB }) { Text("👥", fontSize = 20.sp) }
                     IconButton(onClick = { sub = SubScreen.NEWS }) { Icon(Icons.Filled.Newspaper, "Notícias") }
                     IconButton(onClick = { sub = SubScreen.SETTINGS }) { Icon(Icons.Filled.Settings, "Ajustes") }
                 },
@@ -182,20 +183,28 @@ fun AppRoot(
                 }
             }
         },
+        floatingActionButton = {
+            if (sub == null) androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = { sub = SubScreen.AI },
+                containerColor = F1Red, contentColor = androidx.compose.ui.graphics.Color.White,
+                icon = { Icon(Icons.Filled.AutoAwesome, null) },
+                text = { Text("Coach IA", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            )
+        },
     ) { padding ->
         val m = Modifier.padding(padding)
-        val goAi = { tab = Tab.AI; sub = null }
+        val goAi = { sub = SubScreen.AI }
         when (sub) {
             SubScreen.NEWS -> NewsScreen(vm, m, onOpenUrl, goAi)
             SubScreen.SETTINGS -> SettingsScreen(vm, m)
-            SubScreen.CLUB -> ClubScreen(vm, m, goAi)
+            SubScreen.AI -> AiScreen(vm, m, onOpenUrl)
             null -> when (tab) {
                 Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, { tab = it; sub = null }, onOpenUrl,
-                    onOpenSettings = { sub = SubScreen.SETTINGS }, onOpenClub = { sub = SubScreen.CLUB })
+                    onOpenSettings = { sub = SubScreen.SETTINGS }, onOpenClub = { tab = Tab.CLUB; sub = null }, goAi = goAi)
                 Tab.GARAGE -> GarageScreen(vm, m)
                 Tab.RACE -> RaceScreen(vm, m, goAi)
                 Tab.EVOLVE -> EvolveScreen(vm, m, goAi)
-                Tab.AI -> AiScreen(vm, m, onOpenUrl)
+                Tab.CLUB -> ClubScreen(vm, m, goAi)
             }
         }
     }

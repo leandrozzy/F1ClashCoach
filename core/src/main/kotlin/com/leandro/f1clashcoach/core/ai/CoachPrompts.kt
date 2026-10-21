@@ -68,7 +68,12 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
             sb.appendLine("Carro equipado (totais): Velocidade ${t.speed}, Curvas ${t.cornering}, Unidade de Potência ${t.powerUnit}, Qualificação ${t.qualifying}, Pit stop ${t.pitStop}s, Modo de Ultrapassagem ${t.overtakeMode}")
         }
         if (garage.featuredAssets.isNotEmpty()) sb.appendLine("Recursos em destaque da semana: ${garage.featuredAssets.joinToString()}")
-        if (garage.boosters.isNotEmpty()) sb.appendLine("Reforços no estoque: ${garage.boosters.entries.sortedByDescending { it.value }.take(12).joinToString { "${it.key} x${it.value}" }}")
+        if (garage.boosters.isNotEmpty()) {
+            sb.appendLine("Reforços no estoque (1 por piloto na largada + 1 a cada pit; Largada só vale na 1ª volta):")
+            com.leandro.f1clashcoach.core.engine.Boosters.owned(garage.boosters).sortedByDescending { it.count }.forEach { b ->
+                sb.appendLine("- ${b.name} x${b.count}: " + (b.def?.effects?.entries?.joinToString { "${it.key.label} +${it.value}" } ?: "bônus não catalogado"))
+            }
+        }
         gp?.let { g ->
             sb.appendLine("## Grand Prix atual: ${g.name} | ${g.round ?: ""} | termina em ${g.roundEndsAt?.let { DailyBriefing.formatLeft(it - now) } ?: "?"} | " +
                 "pontuação recomendada ${g.recommendedScore ?: "?"} | entrada ${g.entryFee ?: "?"} | lendários ${when (g.legendaryAllowed) { true -> "permitidos"; false -> "PROIBIDOS"; null -> "?" }} | " +
@@ -90,11 +95,15 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
             val s = p.stats
             sb.appendLine("${p.slot.label} | ${p.name} | ${p.rarity.label} | ${p.progress.level} | ${p.progress.cardsOwned}/${p.progress.cardsNeeded} | ${p.progress.upgradeCoins} | ${s.speed}/${s.cornering}/${s.powerUnit}/${s.qualifying}/${s.pitStop}/${s.overtakeMode} | ${if (p.equipped) "sim" else "não"}")
         }
-        sb.appendLine("## Pilotos (nome | raridade | nível | cartas | custo | OVT/DEF/QUALI/LARG/PNEU | escalado) — 👑 lendário, ⭐ destaque")
+        sb.appendLine("## Pilotos (nome | raridade | nível | cartas | custo | OVT/DEF/QUALI/LARG/PNEU | escalado) — ⭐ destaque. Raridades: Comum/Rara/Épica, Lendária, Especial (edição)")
         garage.drivers.sortedByDescending { it.equipped }.forEach { d ->
             val s = d.stats
-            sb.appendLine("${d.name}${if (d.legendary) " 👑" else ""}${if (d.featured) " ⭐" else ""} | ${d.rarity.label} | ${d.progress.level} | ${d.progress.cardsOwned}/${d.progress.cardsNeeded} | ${d.progress.upgradeCoins} | ${s.overtaking}/${s.defending}/${s.qualifying}/${s.raceStart}/${s.tyreManagement} | ${if (d.equipped) "sim" else "não"}")
+            sb.appendLine("${d.name}${if (d.featured) " ⭐" else ""} | ${d.rarity.label}${if (d.edition.isNotBlank()) " (${d.edition})" else ""} | ${d.progress.level} | ${d.progress.cardsOwned}/${d.progress.cardsNeeded} | ${d.progress.upgradeCoins} | ${s.overtaking}/${s.defending}/${s.qualifying}/${s.raceStart}/${s.tyreManagement} | ${if (d.equipped) "sim" else "não"}")
         }
+        val missing = com.leandro.f1clashcoach.core.model.Catalog.driverCollection(garage).filter { !it.owned }.sortedByDescending { it.maxTotal }.take(8)
+        if (missing.isNotEmpty()) sb.appendLine("## Pilotos mais fortes que ainda NÃO tenho (catálogo 2026, total no nível máximo): " + missing.joinToString { "${it.name} ${it.rarity.label} (série ${it.series}, máx ${it.maxTotal})" })
+        val missingParts = com.leandro.f1clashcoach.core.model.Catalog.partCollection(garage).filter { !it.owned }.sortedByDescending { it.maxTotal }.take(8)
+        if (missingParts.isNotEmpty()) sb.appendLine("## Peças mais fortes que ainda NÃO tenho: " + missingParts.joinToString { "${it.name} ${it.slot?.label} ${it.rarity.label} (série ${it.series}, máx ${it.maxTotal})" })
         val report = HistoryAnalyzer.analyze(history)
         sb.appendLine("## Histórico")
         sb.appendLine("Corridas: ${report.races} | Vitórias: ${report.wins} | Taxa: ${(report.winRate * 100).toInt()}% | Últimas 20: ${(report.recentWinRate * 100).toInt()}%")

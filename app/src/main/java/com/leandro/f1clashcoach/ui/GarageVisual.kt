@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -201,7 +202,16 @@ fun AssetCard(item: CollectionItem, onClick: () -> Unit) {
                 .background(Brush.linearGradient(listOf(c.copy(alpha = if (item.owned) 0.95f else 0.25f), c.copy(alpha = if (item.owned) 0.45f else 0.12f)))),
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.alpha(if (item.owned) 1f else 0.45f)) {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val key = com.leandro.f1clashcoach.art.ArtStore.keyFor(item)
+            val art = androidx.compose.runtime.remember(key, com.leandro.f1clashcoach.art.ArtStore.version) { com.leandro.f1clashcoach.art.ArtStore.load(ctx, key) }
+            if (art != null) {
+                androidx.compose.foundation.Image(
+                    art.asImageBitmap(), item.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().alpha(if (item.owned) 1f else 0.4f),
+                    colorFilter = if (item.owned) null else androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) }),
+                )
+            } else Box(Modifier.alpha(if (item.owned) 1f else 0.45f)) {
                 if (item.isDriver) HelmetIcon(Color.White, 46.dp, c.copy(alpha = 0.9f).compositeDark())
                 else PartIcon(item.slot ?: PartSlot.ENGINE, Color.White, 46.dp, c.compositeDark())
             }
