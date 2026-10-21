@@ -14,9 +14,11 @@ data class RaceContext(
     val tyreManagement: Int = 50,
     /** Tempo médio de pit stop das peças, em segundos. */
     val pitStopTime: Double = 1.0,
-    val pitLaneLoss: Double = 16.0,
+    val pitLaneLoss: Double = 4.0,
     val availableTyres: Set<Tyre> = Tyre.entries.toSet(),
     val startTyre: Tyre? = null,
+    /** Tempos de volta por composto mostrados antes da largada (seco). */
+    val lapTimes: Map<Tyre, Double> = emptyMap(),
 ) {
     fun weatherAt(lap: Int): Weather = weatherByLap.getOrNull(lap - 1) ?: weatherByLap.lastOrNull() ?: Weather.DRY
 }
@@ -89,7 +91,7 @@ class RaceStrategist(private val wear: WearModel = WearModel()) {
                 val w = ctx.weatherAt(lap)
                 used += wear.wearPerLap(ctx.track, s.tyre, ctx.tyreManagement, s.pace) * weatherWearFactor(s.tyre, w)
                 if (used > 1.0) return null
-                time += lapTime(s.tyre, w, s.pace, used)
+                time += lapTime(s.tyre, w, s.pace, used, ctx.lapTimes)
             }
             worstEnd = max(worstEnd, used)
             if (i > 0) time += ctx.pitLaneLoss + ctx.pitStopTime
@@ -102,20 +104,22 @@ class RaceStrategist(private val wear: WearModel = WearModel()) {
     }
 
     companion object {
-        fun lapTime(tyre: Tyre, weather: Weather, pace: DrivingPace, used: Double): Double {
+        fun lapTime(tyre: Tyre, weather: Weather, pace: DrivingPace, used: Double, lapTimes: Map<Tyre, Double> = emptyMap()): Double {
+            val best = lapTimes.values.minOrNull()
             val compound = when (weather) {
-                Weather.DRY -> when (tyre) {
-                    Tyre.SOFT -> 0.0; Tyre.MEDIUM -> 0.5; Tyre.HARD -> 1.0; Tyre.INTER -> 4.0; Tyre.WET -> 7.0
+                // Padrão vem de uma corrida real (Abu Dhabi): S 39,76 / M 40,31 / H 40,81 / W 48,58.
+                Weather.DRY -> lapTimes[tyre]?.let { it - best!! } ?: when (tyre) {
+                    Tyre.SOFT -> 0.0; Tyre.MEDIUM -> 0.55; Tyre.HARD -> 1.05; Tyre.INTER -> 4.0; Tyre.WET -> 8.8
                 }
                 Weather.LIGHT_RAIN -> when (tyre) {
-                    Tyre.SOFT, Tyre.MEDIUM, Tyre.HARD -> 5.0; Tyre.INTER -> 0.0; Tyre.WET -> 1.5
+                    Tyre.SOFT, Tyre.MEDIUM, Tyre.HARD -> 6.0; Tyre.INTER -> 0.0; Tyre.WET -> 1.5
                 }
                 Weather.HEAVY_RAIN -> when (tyre) {
                     Tyre.SOFT, Tyre.MEDIUM, Tyre.HARD -> 10.0; Tyre.INTER -> 2.0; Tyre.WET -> 0.0
                 }
             }
-            val paceDelta = when (pace) { DrivingPace.CONSERVE -> 0.5; DrivingPace.NEUTRAL -> 0.0; DrivingPace.ATTACK -> -0.6 }
-            val degradation = if (used > 0.6) (used - 0.6) * 4.0 else 0.0
+            val paceDelta = when (pace) { DrivingPace.CONSERVE -> 0.4; DrivingPace.NEUTRAL -> 0.0; DrivingPace.ATTACK -> -0.4 }
+            val degradation = if (used > 0.6) (used - 0.6) * 3.0 else 0.0
             return compound + paceDelta + degradation
         }
 

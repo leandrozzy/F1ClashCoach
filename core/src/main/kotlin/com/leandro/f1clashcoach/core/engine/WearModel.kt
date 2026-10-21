@@ -37,7 +37,8 @@ class WearModel(observations: List<TyreObservation> = emptyList()) {
     companion object {
         private const val PRIOR_WEIGHT = 3.0
         val BASE: Map<Tyre, Double> = mapOf(
-            Tyre.SOFT to 0.30, Tyre.MEDIUM to 0.20, Tyre.HARD to 0.14, Tyre.INTER to 0.18, Tyre.WET to 0.15,
+            // Duração mostrada no jogo: Soft 1-2 voltas, Medium 2-3, Hard 3-5, Wet 2-3.
+            Tyre.SOFT to 0.55, Tyre.MEDIUM to 0.40, Tyre.HARD to 0.25, Tyre.INTER to 0.40, Tyre.WET to 0.40,
         )
 
         fun paceFactor(p: DrivingPace): Double = when (p) {
