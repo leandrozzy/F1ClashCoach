@@ -66,10 +66,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val image = imageUri?.let { uri ->
                     withContext(Dispatchers.IO) { ImageUtils.loadUri(app, uri)?.let { AiImage(ImageUtils.toJpeg(it), "image/jpeg") } }
                 }
-                val prompt = CoachPrompts.withContext(q, CoachPrompts.accountContext(d.garage, d.races, focusTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp))
+                val prompt = CoachPrompts.withContext(q, CoachPrompts.accountContext(d.garage, d.races, focusTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags))
                 val answer = advisor.ask(AiRequest(CoachPrompts.system(), prompt, history, image, webSearch))
                 store.addChat(ChatMessage(false, answer.text.ifBlank { "(sem resposta)" }, answer.sources.map { "${it.title}|${it.url}" }))
                 if (webSearch && q == CoachPrompts.WEEKLY_META) store.update { it.copy(lastMeta = answer.text, lastMetaTime = System.currentTimeMillis()) }
+                if (q == CoachPrompts.TARGET_META) store.update { it.copy(targetMeta = answer.text, targetMetaTime = System.currentTimeMillis()) }
             } catch (e: Exception) {
                 store.addChat(ChatMessage(false, "⚠️ ${e.message}"))
             } finally {
@@ -100,7 +101,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
-                val prompt = CoachPrompts.withContext(CoachPrompts.DAILY_BRIEFING, CoachPrompts.accountContext(d.garage, d.races, null, d.events, System.currentTimeMillis(), d.objectives, d.gp))
+                val prompt = CoachPrompts.withContext(CoachPrompts.DAILY_BRIEFING, CoachPrompts.accountContext(d.garage, d.races, null, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags))
                 val a = advisor.ask(AiRequest(CoachPrompts.system(), prompt, webSearch = true))
                 store.setBriefing(a.text, a.sources.map { "${it.title}|${it.url}" })
             } catch (e: Exception) {

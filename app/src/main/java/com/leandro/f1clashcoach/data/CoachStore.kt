@@ -50,6 +50,13 @@ data class CoachData(
     val objectives: List<Objective> = emptyList(),
     /** Grand Prix em andamento (lido das telas do GP). */
     val gp: GrandPrixState? = null,
+    /** Séries de Duelos lidas da tela (faixa de pontuação, bandeiras, prêmios). */
+    val series: Map<Int, com.leandro.f1clashcoach.core.model.SeriesInfo> = emptyMap(),
+    /** Total de bandeiras da conta. */
+    val flags: Int? = null,
+    /** Meta para chegar à série alvo (pesquisa da IA). */
+    val targetMeta: String = "",
+    val targetMetaTime: Long = 0,
 )
 
 /** Tudo que o Coach sabe fica neste arquivo JSON, no próprio aparelho. */
@@ -141,7 +148,10 @@ class CoachStore(context: Context) {
         update { d ->
             val r = GameSync.apply(d.garage, read, d.objectives, d.gp, now)
             changes = r.changes
-            d.copy(garage = r.garage, objectives = r.objectives ?: d.objectives, gp = r.gp ?: d.gp)
+            d.copy(
+                garage = r.garage, objectives = r.objectives ?: d.objectives, gp = r.gp ?: d.gp,
+                series = d.series + r.series.associateBy { it.number }, flags = r.flags ?: d.flags,
+            )
         }
         return changes
     }

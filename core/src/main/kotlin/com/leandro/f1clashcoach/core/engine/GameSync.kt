@@ -14,6 +14,8 @@ data class SyncResult(
     val objectives: List<Objective>? = null,
     val gp: GrandPrixState? = null,
     val changes: List<String> = emptyList(),
+    val series: List<com.leandro.f1clashcoach.core.model.SeriesInfo> = emptyList(),
+    val flags: Int? = null,
 )
 
 /**
@@ -35,6 +37,10 @@ object GameSync {
         var g = garage
         val changes = mutableListOf<String>()
 
+        // Loadout limitado de GP mostra outra configuração: só aproveita cartas/níveis, não o equipado.
+        val r0 = read
+        @Suppress("NAME_SHADOWING")
+        val read = if (r0.restricted) r0.copy(teamScore = null, carTotals = null, equippedParts = emptyList(), driverPair = emptyList()) else r0
         read.coins?.let { if (it != g.coins) g = g.copy(coins = it) }
         read.bucks?.let { if (it != g.bucks) g = g.copy(bucks = it) }
         read.series?.let { if (it != g.series) { g = g.copy(series = it); changes += "Série $it" } }
@@ -107,6 +113,36 @@ object GameSync {
             }
             changes += "Pilotos escalados: ${read.driverPair.joinToString { it.first!! }}"
         }
+        // Tela de detalhe: raridade, nível mínimo de GP, custo e ganho do próximo nível.
+        read.asset?.let { a ->
+            val sur = key(a.name.split(" ").last())
+            if (a.isDriver) {
+                val i = drivers.indexOfFirst { key(it.name).endsWith(sur.takeLast(6)) || sur.endsWith(key(it.name).takeLast(6)) }
+                if (i >= 0) {
+                    val d = drivers[i]
+                    drivers[i] = d.copy(
+                        rarity = if (a.rarity != com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN) a.rarity else d.rarity,
+                        minTier = a.minTier ?: d.minTier,
+                        stats = a.driverStats ?: d.stats,
+                        nextLevelStats = a.driverStats?.let { st -> a.driverGain?.let { gn ->
+                            com.leandro.f1clashcoach.core.model.DriverStats(st.overtaking + gn.overtaking, st.defending + gn.defending, st.qualifying + gn.qualifying, st.raceStart + gn.raceStart, st.tyreManagement + gn.tyreManagement)
+                        } } ?: d.nextLevelStats,
+                        progress = d.progress.copy(
+                            cardsOwned = a.cardsOwned ?: d.progress.cardsOwned, cardsNeeded = a.cardsNeeded ?: d.progress.cardsNeeded,
+                            level = a.level ?: d.progress.level, upgradeCoins = a.upgradeCost?.toInt() ?: d.progress.upgradeCoins,
+                        ),
+                    )
+                    changes += "Detalhes de ${d.name} atualizados"
+                }
+            } else {
+                val i = parts.indexOfFirst { key(it.name) == key(a.name) }
+                if (i >= 0) {
+                    val pt = parts[i]
+                    parts[i] = pt.copy(minTier = a.minTier ?: pt.minTier,
+                        progress = pt.progress.copy(upgradeCoins = a.upgradeCost?.toInt() ?: pt.progress.upgradeCoins))
+                }
+            }
+        }
         // Marca destaques da semana em quem você tem.
         val feat = g.featuredAssets.map { key(it) }
         fun isFeat(n: String) = feat.any { f -> f.isNotEmpty() && (key(n).endsWith(f.takeLast(6)) || f.endsWith(key(n).takeLast(6))) }
@@ -153,6 +189,6 @@ object GameSync {
                 seenAt = now,
             )
         }
-        return SyncResult(g, objectives, gp, changes)
+        return SyncResult(g, objectives, gp, changes, read.seriesCards.map { it.copy(seenAt = now) }, read.flags)
     }
 }

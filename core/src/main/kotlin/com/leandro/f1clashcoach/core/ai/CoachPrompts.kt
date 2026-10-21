@@ -33,6 +33,18 @@ Como trabalhar:
 
 Modos do jogo que você deve conhecer e orientar: Liga/Série (sobe de série), Grand Prix semanal (classificação + corridas, boosters), Eventos com marcos e prazo, Exibição (sem troféus, para testar), Momentos F1 (cenários com objetivo), Clube (pedir/doar cartas) e Temporada/Passe.
 
+Regras oficiais (central de ajuda da Hutch) que você deve usar:
+- Duelos: 12 Séries de 4 pistas (as pistas giram). Bandeiras desbloqueiam séries; podem ser perdidas em derrotas, mas série desbloqueada não se perde. Séries 10/11/12 = Grand Slam de Bronze/Prata/Ouro.
+- Troféus (Pit Pass): na série mais alta desbloqueada, vitória = 3, derrota = 1, volta mais rápida = +1.
+- Matchmaking pela Pontuação da Equipe; cada série tem faixa recomendada (ex.: S8 850–1100, S12 ~1450–1799).
+- Grand Prix: 5 dias, Classificatória (qua/qui/sex, basta passar em 1 dia), Abertura (sáb) e Final (dom); prêmios só para quem chega à Final. Níveis: Júnior (peças/pilotos até Série 3), Competidor (até 6), Contendor (até 9), Campeão (sem limite). Lendários só quando o evento permite.
+- Recursos em Destaque: +10% nas estatísticas em todo o jogo enquanto o evento está ativo.
+- Liga semanal: segunda a segunda, posição pelas moedas ganhas em vitórias; zonas de promoção/rebaixamento.
+- Clubes: Reputação (estrelas) vem de Duelos e das recompensas finais de GP; Exibições (~4 semanas) definem promoção/rebaixamento de divisão; perks melhores por divisão. Power-up Reputation Rise dobra reputação de Duelos; Flag Storm dobra bandeiras; Pit Pass Premium +5% reputação.
+- Overtake Mode vem da Bateria, liberado após a 1ª volta; bloqueado em Safety Car, com 0% de pneu ou entrando no pit.
+
+Objetivo do jogador: chegar à Série 12 (Grand Slam de Ouro), vencer muitos Duelos para gerar estrelas e subir o clube (ele é presidente) e montar os melhores pilotos (inclusive lendários e edições especiais) e peças para isso.
+
 Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Power Unit, Qualifying, tempo de Pit Stop, Overtake Mode), atributos dos pilotos (Overtaking, Defending, Qualifying, Race Start, Tyre Management), pneus (macio, médio, duro, intermediário, chuva), ritmo (conservar/neutro/atacar), energia da bateria, clima, Featured Assets, boosters, ligas, eventos e economia (moedas, bucks, caixas, cartas).
 """.trim()
 
@@ -45,6 +57,8 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
         now: Long = System.currentTimeMillis(),
         objectives: List<Objective> = emptyList(),
         gp: GrandPrixState? = null,
+        series: List<com.leandro.f1clashcoach.core.model.SeriesInfo> = emptyList(),
+        flags: Int? = null,
     ): String {
         val sb = StringBuilder()
         sb.appendLine("## Conta")
@@ -59,6 +73,12 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
             sb.appendLine("## Grand Prix atual: ${g.name} | ${g.round ?: ""} | termina em ${g.roundEndsAt?.let { DailyBriefing.formatLeft(it - now) } ?: "?"} | " +
                 "pontuação recomendada ${g.recommendedScore ?: "?"} | entrada ${g.entryFee ?: "?"} | lendários ${when (g.legendaryAllowed) { true -> "permitidos"; false -> "PROIBIDOS"; null -> "?" }} | " +
                 "corridas ${g.racesPlayed ?: "?"}/${g.racesTotal ?: "?"} | meus pontos ${g.myPoints ?: "?"} | bônus destaque ${g.featuredBoostPct ?: "?"}%")
+        }
+        if (series.isNotEmpty()) {
+            val plan = com.leandro.f1clashcoach.core.engine.Progression.plan(garage, series, history, flags)
+            sb.appendLine("## Rumo à Série 12 (Grand Slam de Ouro) — bandeiras: ${flags ?: "?"}")
+            plan.steps.forEach { st -> sb.appendLine("- Série ${st.series.number} ${st.series.name}: faixa ${st.series.scoreMin}–${st.series.scoreMax}, faltam ${st.flagsMissing ?: "?"} bandeiras, prêmio ${st.series.prizeCoins} moedas ★${st.series.prizeStars}") }
+            plan.advice.take(3).forEach { sb.appendLine("* $it") }
         }
         val pend = objectives.filter { !it.done && (it.endsAt == null || it.endsAt > now) }
         if (pend.isNotEmpty()) {
@@ -114,6 +134,10 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
 
     /** Gerado automaticamente 1x por dia (ou quando aparece evento novo), sem o usuário pedir. */
     const val DAILY_BRIEFING = "Monte meu BRIEFING DO DIA no F1 Clash, como um treinador. Pesquise na web o que está ativo agora (Grand Prix da semana, eventos, Momentos F1, Featured Assets, novidades da temporada) e cruze com a minha conta. Formato: 1) As 3 ações mais importantes de hoje, em ordem. 2) Eventos/GP ativos: como jogar cada um e se vale a pena para mim. 3) Upgrade do dia. 4) Um alerta sobre algo que eu esteja fazendo errado (pelo histórico). Seja curto e direto."
+
+    const val TARGET_META = "Pesquise na web (guias atuais da Série 12, Séries 10-11, Featured Assets da semana) e monte meu caminho até a Série 12 (Grand Slam de Ouro): 1) melhores pilotos para a Série 12, separando comuns/raros/épicos, LENDÁRIOS e EDIÇÕES ESPECIAIS, e quais eu já tenho; 2) melhores peças por slot para a Série 12 e alternativas que eu tenho; 3) ordem exata de upgrades com minhas moedas e cartas para subir a pontuação da equipe até ~1450; 4) onde buscar as cartas que faltam (caixotes, eventos, loja, clube). Seja específico com nomes."
+
+    const val CLUB_PLAN = "Sou presidente do clube. Monte um plano para subir o clube na liga de clubes (Exibição): como maximizar estrelas/reputação (Duelos, GP, Reputation Rise, Pit Pass Premium), metas por membro por semana, como organizar pedidos e doações de cartas, critérios para recrutar/remover membros inativos e mensagens prontas para o chat do clube."
 
     fun eventAnalysis(modeLabel: String, name: String): String =
         "Esta é a tela do $modeLabel \"$name\" no F1 Clash. Leia regras, objetivo, pista, prazo e recompensas que aparecem no print, pesquise na web se precisar, e diga em até 8 linhas: vale a pena? como jogar (setup, pneus, energia, boosters)? o que fazer primeiro?"

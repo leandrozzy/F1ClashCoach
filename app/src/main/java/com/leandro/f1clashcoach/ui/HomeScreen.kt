@@ -146,6 +146,38 @@ fun HomeScreen(
             }
         }
 
+        // ---------- Rumo à Série 12 ----------
+        item {
+            val prog = remember(data.garage, data.series, data.races, data.flags) {
+                com.leandro.f1clashcoach.core.engine.Progression.plan(data.garage, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(data.series), data.races, data.flags)
+            }
+            SectionCard("🏁 Rumo ao Grand Slam de Ouro (Série 12)") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    Stat("Série atual", prog.currentSeries.toString())
+                    Stat("Bandeiras", data.flags?.toString() ?: "—")
+                    val tmin = prog.target?.scoreMin
+                    Stat("Pontuação", "${prog.teamScore}/${tmin ?: "?"}", if (tmin != null && prog.teamScore >= tmin) Good else Warn)
+                }
+                prog.steps.forEach { st ->
+                    Text("Série ${st.series.number} • ${st.series.name}: " +
+                        (st.flagsMissing?.let { "faltam $it 🏳" } ?: "") +
+                        (st.scoreGap?.takeIf { it > 0 }?.let { " • +$it pontuação" } ?: " • pontuação ok") +
+                        (st.estRaces?.let { " • ~$it corridas" } ?: "") +
+                        (st.series.prizeStars?.let { " • ★${it}/vitória" } ?: ""), fontSize = 12.sp)
+                }
+                prog.advice.take(3).forEach { Text("💡 $it", fontSize = 12.sp) }
+                Text("Abra Corrida → Duelos no jogo com o Coach ligado para atualizar bandeiras e faixas.", fontSize = 11.sp, color = Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { vm.ask(CoachPrompts.TARGET_META, webSearch = true); navigate(Tab.AI) }, modifier = Modifier.weight(1f)) { Text("🌐 Melhores p/ S12", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { vm.ask(CoachPrompts.CLUB_PLAN, webSearch = true); navigate(Tab.AI) }, modifier = Modifier.weight(1f)) { Text("⭐ Plano do clube", fontSize = 12.sp) }
+                }
+                if (data.targetMeta.isNotBlank()) {
+                    Text("Última pesquisa S12:", fontSize = 11.sp, color = Muted)
+                    Text(data.targetMeta.take(500) + if (data.targetMeta.length > 500) "…" else "", fontSize = 12.sp)
+                }
+            }
+        }
+
         // ---------- Eventos ativos ----------
         val active = data.events.filter { !it.isOver(now) }.sortedBy { it.endsAt ?: Long.MAX_VALUE }
         if (active.isNotEmpty()) item {

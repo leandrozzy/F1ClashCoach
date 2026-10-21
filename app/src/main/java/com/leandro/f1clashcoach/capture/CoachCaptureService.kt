@@ -286,7 +286,7 @@ class CoachCaptureService : Service() {
                 runCatching {
                     val d = app.store.data.value
                     val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
-                    val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp)
+                    val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags)
                     advisor.ask(AiRequest(CoachPrompts.system(), CoachPrompts.withContext(CoachPrompts.eventAnalysis(mode.label, title), ctx),
                         image = AiImage(ImageUtils.toJpeg(frame), "image/jpeg"), webSearch = true))
                 }.onSuccess { a ->
@@ -402,7 +402,7 @@ class CoachCaptureService : Service() {
             val text = try {
                 val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
                 val d = app.store.data.value
-                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp)
+                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags)
                 val prompt = CoachPrompts.withContext(
                     CoachPrompts.ANALYZE_SCREENSHOT + " Estou no meio do jogo: responda em no máximo 6 linhas curtas.", ctx,
                 )

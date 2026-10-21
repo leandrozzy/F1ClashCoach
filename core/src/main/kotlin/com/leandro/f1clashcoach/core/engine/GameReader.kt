@@ -107,6 +107,22 @@ data class GridTile(
     val canUpgrade: Boolean get() = cardsNeeded > 0 && cardsOwned >= cardsNeeded
 }
 
+/** Tela de detalhe de um piloto ou peça. */
+data class AssetDetail(
+    val name: String,
+    val isDriver: Boolean,
+    val rarity: com.leandro.f1clashcoach.core.model.Rarity,
+    val minTier: String?,
+    val cardsOwned: Int?,
+    val cardsNeeded: Int?,
+    val level: Int?,
+    val upgradeCost: Long?,
+    val driverStats: DriverStats? = null,
+    val driverGain: DriverStats? = null,
+    val carStats: CarStats? = null,
+    val carGain: CarStats? = null,
+)
+
 data class ObjectiveRead(val weekly: Boolean, val text: String, val progress: Int, val target: Int, val reward: Long?)
 
 data class GpRead(
@@ -123,6 +139,10 @@ data class GpRead(
     val leaderboard: List<Pair<String, Int>> = emptyList(),
     /** Pista do GP, quando reconhecida pelo nome. */
     val trackId: String? = null,
+    val laps: Int? = null,
+    val rainChance: Int? = null,
+    val sponsorTask: String? = null,
+    val racePrize: Long? = null,
 )
 
 /** Tudo que dá para extrair das telas de menu do F1 Clash (layout vertical, PT-BR ou EN). */
@@ -151,6 +171,17 @@ data class GameRead(
     val clubLeagueLeftMs: Long? = null,
     val freeCrateReady: Boolean = false,
     val series: Int? = null,
+    /** Loadout limitado de GP: não representa a equipe principal. */
+    val restricted: Boolean = false,
+    val asset: AssetDetail? = null,
+    /** Cartões de séries de Duelos visíveis. */
+    val seriesCards: List<com.leandro.f1clashcoach.core.model.SeriesInfo> = emptyList(),
+    /** Total de bandeiras (cabeçalho da seleção de séries). */
+    val flags: Int? = null,
+    /** Tempos de volta por composto na largada: piloto → (pneu → segundos). */
+    val tyreLapTimes: Map<String, Map<com.leandro.f1clashcoach.core.model.Tyre, Double>> = emptyMap(),
+    val tyreLapRanges: Map<com.leandro.f1clashcoach.core.model.Tyre, IntRange> = emptyMap(),
+    val totalLaps: Int? = null,
 )
 
 object GameReader {
@@ -188,9 +219,15 @@ object GameReader {
         fun h(vararg kws: String) = kws.count { Txt.has(all, it) }
         val tabs = h("PILOTOS", "CARROS", "REFORCOS")
         return when {
+            h("OSRECURSOSEMDESTAQUERECEBEM", "RECEBEMUMAUMENTO") >= 1 -> GameScreen.FEATURED
+            h("DISPONIVELEM") >= 1 && h("ESTATNONIVELMAX", "ESTATISTICASDOPILOTOATUAL", "ESTATISTICASDAPECAATUAL", "COLETEMAIS", "ATRIBUIRAOCARRO") >= 1 &&
+                h("CONFIGURACOESDEEQUIPE") == 0 -> GameScreen.ASSET_DETAIL
+            h("SELECIONEUMCOMPOSTO", "COMPOSTODEPNEU") >= 1 || (h("ADERENCIA") >= 2 && h("SOFT", "MEDIUM", "HARD") >= 2) -> GameScreen.PRE_RACE_TYRES
+            h("AMAISREQUERIDOS", "REQUERIDOSPARADESBLOQUEAR") >= 1 || (h("PONTUACAODAEQUIPE") >= 1 && h("BANDEIRAS") >= 1 && h("VITORIA", "DERROTA") >= 1) -> GameScreen.DUEL_SERIES
             h("OBJETIVOSDIARIOS", "OBJETIVOSSEMANAIS", "LOJADOSOBJETIVOS", "DAILYOBJECTIVES") >= 1 -> GameScreen.OBJECTIVES
             h("DUELOS") >= 1 && h("MOMENTOSF1", "DESAFIOSINDIVIDUAIS") >= 1 -> GameScreen.RACE_MENU
             h("JOGARCORRIDA", "ZONADEPROMOCAO") >= 1 && h("GRANDPRIX") >= 1 -> GameScreen.GP
+            h("JOGARCORRIDA") >= 1 && h("TAREFADOPATROCINADOR", "GANHOSPORCORRIDA", "VOLTAS") >= 2 -> GameScreen.GP
             h("JUNIOR", "COMPETIDOR", "CONTENDOR", "CAMPEAO") >= 3 -> GameScreen.GP
             h("RODADACLASSIFICATORIA", "PREMIOS", "TAREFA") >= 2 && h("GRANDPRIX") >= 1 -> GameScreen.GP
             h("REFORCOSPODEMSEREQUIPADOS", "BOOSTERSCANBEEQUIPPED") >= 1 -> GameScreen.BOOSTERS
@@ -218,7 +255,7 @@ object GameReader {
         val coins = top.getOrNull(0)?.let { Txt.bigNumber(it.t.text) }?.takeIf { it >= 1000 }
         val bucks = top.getOrNull(1)?.let { Txt.bigNumber(it.t.text) }
 
-        var r = GameRead(screen = screen, coins = coins, bucks = bucks)
+        var r = GameRead(screen = screen, coins = coins, bucks = bucks, restricted = Txt.has(all, "LIMITACAODERECURSOS") || Txt.has(all, "RECURSOSAPLICADA"))
         r = r.copy(series = Regex("""SERIE(\d{1,2})""").findAll(all).map { it.groupValues[1].toInt() }
             .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key?.takeIf { screen == GameScreen.OBJECTIVES || screen == GameScreen.PIT_PASS })
 
@@ -232,6 +269,10 @@ object GameReader {
             GameScreen.STORE -> r = r.copy(featured = featured(ls))
             GameScreen.BOOSTERS -> r = r.copy(boosters = boosters(ls))
             GameScreen.CLUB -> r = readClub(ls, all, r)
+            GameScreen.ASSET_DETAIL -> r = r.copy(asset = readAsset(ls, all))
+            GameScreen.FEATURED -> r = r.copy(featured = featuredInfo(ls))
+            GameScreen.DUEL_SERIES -> r = readSeries(ls, r)
+            GameScreen.PRE_RACE_TYRES -> r = readTyres(ls, all, r)
             GameScreen.PIT_PASS -> {
                 val title = ls.firstOrNull { Regex("""EXIBICAO\d""").containsMatchIn(it.c) }
                 r = r.copy(seasonName = title?.t?.text?.trim(), seasonLeftMs = Txt.duration(ls.joinToString(" ") { it.t.text }))
@@ -374,6 +415,7 @@ object GameReader {
 
     private fun readGp(ls: List<L>, all: String): GpRead? {
         val gpIdx = ls.indexOfFirst { Txt.has(it.c, "GRANDPRIX") && it.t.top < 0.75f }
+            .let { i -> if (i >= 0) i else ls.indexOfFirst { it.c.startsWith("GRAND") && it.t.top < 0.2f } }
         if (gpIdx < 0) return null
         val gpLine = ls[gpIdx]
         // Nome: linhas logo acima de "GRAND PRIX" (ex.: "UNITED STATES"), ignorando "FORMULA 1".
@@ -412,7 +454,13 @@ object GameReader {
             t.aliases.any { a -> Txt.compact(a).length >= 4 && Txt.compact(name).contains(Txt.compact(a)) }
         }
         val prettyName = track?.let { "GP ${it.name} (${it.country})" } ?: name
-        return GpRead(prettyName, round, timeLeft, rec, fee, legendary, tier, play?.groupValues?.get(1)?.toInt(), play?.groupValues?.get(2)?.toInt(), boost, board, track?.id)
+        val voltas = labelLine(ls, "VOLTAS")
+        val laps = voltas?.let { v -> Regex("""(\d{1,2})""").find(Txt.digitsFix(v.t.text.substringAfter(":", "")))?.value?.toIntOrNull() }
+        val rain = voltas?.let { v -> ls.firstOrNull { it !== v && it.cy > v.cy && it.cy - v.cy < 0.05f && abs(it.cx - v.cx) < 0.15f && it.t.text.contains("%") } }
+            ?.let { Regex("""(\d{1,3})\s?%""").find(Txt.digitsFix(it.t.text.replace("%", "%")))?.groupValues?.get(1)?.toIntOrNull() }
+        val sponsor = labelLine(ls, "TAREFADOPATROCINADOR")?.let { l -> ls.firstOrNull { it.cy > l.cy && it.cy - l.cy < 0.03f && it !== l }?.t?.text?.trim() }
+        val prize = labelLine(ls, "GANHOSPORCORRIDA")?.let { l -> ls.filter { sameRow(it, l) && it !== l }.firstNotNullOfOrNull { Txt.bigNumber(it.t.text) } }
+        return GpRead(prettyName, round, timeLeft, rec, fee, legendary, tier, play?.groupValues?.get(1)?.toInt(), play?.groupValues?.get(2)?.toInt(), boost, board, track?.id, laps, rain, sponsor, prize)
     }
 
     private fun featured(ls: List<L>): List<String> =
@@ -432,6 +480,73 @@ object GameReader {
         }
         return out
     }
+
+    private val TIER_NAMES = listOf("JUNIOR" to "Júnior", "COMPETIDOR" to "Competidor", "CONTENDOR" to "Contendor", "CAMPEAO" to "Campeão")
+
+    private fun readAsset(ls: List<L>, all: String): AssetDetail? {
+        // Nome em duas linhas no topo: "Gabriel" / "BORTOLETO".
+        val top = ls.filter { it.t.top < 0.2f && it.t.text.count { c -> c.isLetter() } >= 3 && !Txt.has(it.c, "LIMITACAO") && !Txt.has(it.c, "BONUS") &&
+            !Txt.has(it.c, "DISPONIVEL") && !Txt.has(it.c, "PATROCINADOR") && !Txt.has(it.c, "TROFEUS") && !Txt.has(it.c, "MANTENHA") && !Txt.has(it.c, "ESTATISTICAS") }
+        val surname = top.firstOrNull { l -> l.t.text.trim().let { t -> t.length >= 3 && t == t.uppercase() && t.any { it.isLetter() } } &&
+            listOf("RARO", "COMUM", "EPICO", "LENDARIO", "ESPECIAL", "ESCOLHAS").none { Txt.has(l.c, it) } } ?: return null
+        val first = top.lastOrNull { it.cy < surname.cy && surname.cy - it.cy < 0.04f && it.t.text.first().isUpperCase() && it.t.text != it.t.text.uppercase() }
+        val name = listOfNotNull(first?.t?.text?.trim(), surname.t.text.trim()).joinToString(" ")
+        val rarity = when {
+            Txt.has(all, "LENDARIO") && !Txt.has(all, "PILOTOSLENDARIOS") -> com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY
+            Txt.has(all, "ESPECIAL") -> com.leandro.f1clashcoach.core.model.Rarity.SPECIAL
+            ls.any { it.t.top < 0.2f && Txt.has(it.c, "EPICO") } -> com.leandro.f1clashcoach.core.model.Rarity.EPIC
+            ls.any { it.t.top < 0.2f && it.c.startsWith("RAR") } -> com.leandro.f1clashcoach.core.model.Rarity.RARE
+            ls.any { it.t.top < 0.2f && Txt.has(it.c, "COMUM") } -> com.leandro.f1clashcoach.core.model.Rarity.COMMON
+            else -> com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN
+        }
+        val availIdx = ls.indexOfFirst { Txt.has(it.c, "DISPONIVELEM") && it.t.top < 0.25f }
+        val tierZone = if (availIdx >= 0) ls.drop(availIdx).take(3).joinToString("") { it.c } else ""
+        val minTier = TIER_NAMES.firstOrNull { (k, _) -> Txt.has(tierZone, k) }?.second
+        val cards = ls.filter { it.t.top < 0.3f }.firstNotNullOfOrNull { CARDS.find(Txt.digitsFix(it.t.text.trim())) }
+        val costLine = labelLine(ls, "ATUALIZAR", "UPGRADE") ?: ls.firstOrNull { it.c.startsWith("ATUALI") && it.c.length <= 10 }
+        val cost = costLine?.let { l -> ls.filter { sameRow(it, l) && it !== l }.firstNotNullOfOrNull { Txt.bigNumber(it.t.text) }?.takeIf { it >= 1000 } }
+        val comparing = Txt.has(all, "ATRIBUIRAOCARRO")
+        var stats: DriverStats? = null; var gain: DriverStats? = null
+        if (!comparing) {
+            val labels = listOf(listOf("ULTRAPASSANDO"), listOf("DEFESA"), listOf("QUALIFICACAO"), listOf("INICIODECORRIDA", "INICIODE"), listOf("GERENCIAMENTODEPNEUS", "GERENCIAMENTO"))
+            // Valor e incremento ficam à direita do rótulo (ou na linha logo acima, se o rótulo quebrou).
+            fun rowVals(kws: List<String>): Pair<Int?, Int?> {
+                val l = labelLine(ls, *kws.toTypedArray()) ?: return null to null
+                val near = ls.filter { it !== l && it.t.left > l.t.left + 0.2f && abs(it.cy - l.cy) < 0.025f }
+                val v = near.firstNotNullOfOrNull { Regex("""^(\d{1,3})$""").find(Txt.digitsFix(it.t.text.trim()))?.value?.toIntOrNull() }
+                val g = near.firstNotNullOfOrNull { Regex("""^\+(\d{1,2})$""").find(it.t.text.trim())?.groupValues?.get(1)?.toIntOrNull() }
+                return v to g
+            }
+            var rows = labels.map { rowVals(it) }
+            // Se algum rótulo não foi lido, usa a ordem fixa das 5 linhas (valor à direita + incremento).
+            val header = labelLine(ls, "ESTATISTICASDOPILOTOATUAL", "ESTATISTICASDAPECAATUAL")
+            if (header != null && rows.any { it.first == null }) {
+                val vals = ls.filter { it.cy > header.cy && it.cy - header.cy < 0.25f && it.cx > 0.6f && Regex("""^\d{1,3}$""").matches(Txt.digitsFix(it.t.text.trim())) }
+                    .sortedBy { it.cy }
+                if (vals.size == 5) rows = vals.map { v ->
+                    Txt.digitsFix(v.t.text.trim()).toInt() to ls.firstOrNull { o -> o !== v && sameRow(o, v) && o.t.text.trim().startsWith("+") }
+                        ?.let { Regex("""\+(\d{1,2})""").find(it.t.text)?.groupValues?.get(1)?.toIntOrNull() }
+                }
+            }
+            if (rows.count { it.first != null } >= 3) {
+                stats = DriverStats(rows[0].first ?: 0, rows[1].first ?: 0, rows[2].first ?: 0, rows[3].first ?: 0, rows[4].first ?: 0)
+                if (rows.count { it.second != null } >= 3) gain = DriverStats(rows[0].second ?: 0, rows[1].second ?: 0, rows[2].second ?: 0, rows[3].second ?: 0, rows[4].second ?: 0)
+            }
+        }
+        val isDriver = Txt.has(all, "PILOTO") || stats != null || Txt.has(all, "ULTRAPASSANDO")
+        return AssetDetail(name, isDriver, rarity, minTier, cards?.groupValues?.get(2)?.toIntOrNull(), cards?.groupValues?.get(3)?.toIntOrNull(),
+            cards?.groupValues?.get(1)?.toIntOrNull(), cost, stats, gain)
+    }
+
+    private fun featuredInfo(ls: List<L>): List<String> =
+        ls.filter { l -> l.t.text.count { it.isLetter() } >= 6 && l.cx in 0.2f..0.8f &&
+            listOf("RECURSOS", "ESCOLHAS", "AUMENTO", "ESTATISTICAS", "EVENTO", "MOMENTOS", "ACESSO", "VOLTAR", "ZUMENTO", "ENQUANTO").none { Txt.has(l.c, it) } &&
+            !l.t.text.contains("%") && l.t.top > 0.3f && l.t.top < 0.85f
+        }.map { it.t.text.trim() }.distinctBy { Txt.compact(it) }
+
+    private fun readSeries(ls: List<L>, base: GameRead): GameRead = base // calibrado com o vídeo da corrida (ver readSeriesCards)
+
+    private fun readTyres(ls: List<L>, all: String, base: GameRead): GameRead = base
 
     private fun readClub(ls: List<L>, all: String, base: GameRead): GameRead {
         val name = ls.firstOrNull { it.t.top < 0.07f && it.t.bottom > 0.03f && it.t.text.any { c -> c.isLetter() } }?.t?.text?.trim()

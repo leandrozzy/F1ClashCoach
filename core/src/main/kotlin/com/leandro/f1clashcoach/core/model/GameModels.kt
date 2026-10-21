@@ -16,7 +16,7 @@ enum class PartSlot(val label: String, val keywords: List<String>) {
 
 @Serializable
 enum class Rarity(val label: String) {
-    COMMON("Comum"), RARE("Rara"), EPIC("Épica"), LEGENDARY("Lendária"), UNKNOWN("?")
+    COMMON("Comum"), RARE("Rara"), EPIC("Épica"), LEGENDARY("Lendária"), SPECIAL("Especial"), UNKNOWN("?")
 }
 
 /** Atributos de uma peça. [pitStop] é o tempo médio de pit stop em segundos (menor é melhor). */
@@ -84,6 +84,8 @@ data class Part(
     val equipped: Boolean = false,
     /** Recurso em destaque da semana (+10% nas estatísticas em eventos). */
     val featured: Boolean = false,
+    /** Nível mínimo de GP em que pode ser usada ("Júnior", "Competidor"…). */
+    val minTier: String? = null,
 )
 
 @Serializable
@@ -96,6 +98,7 @@ data class Driver(
     val nextLevelStats: DriverStats? = null,
     val equipped: Boolean = false,
     val featured: Boolean = false,
+    val minTier: String? = null,
 ) {
     /** Lendário = não está no grid atual (alguns GPs proíbem lendários). */
     val legendary: Boolean get() = !CurrentGrid.isCurrent(name)

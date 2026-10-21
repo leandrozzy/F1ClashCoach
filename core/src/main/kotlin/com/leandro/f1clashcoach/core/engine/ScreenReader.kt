@@ -19,7 +19,9 @@ enum class GameScreen(val label: String) {
     RACE("Corrida"), QUALIFYING("Classificação"), PRE_RACE("Pré-corrida"), RACE_RESULT("Resultado"),
     PARTS("Peças"), DRIVERS("Pilotos"), UPGRADE("Upgrade"), STORE("Loja"), EVENT("Evento / modo de jogo"), MENU("Menu"),
     HOME("Início"), RACE_MENU("Escolha de corrida"), GP("Grand Prix"), OBJECTIVES("Objetivos"), TEAM_DRIVERS("Equipe • Pilotos"),
-    TEAM_CARS("Equipe • Carros"), BOOSTERS("Reforços"), CLUB("Clube"), PIT_PASS("Pit Pass"), UNKNOWN("Desconhecida")
+    TEAM_CARS("Equipe • Carros"), BOOSTERS("Reforços"), CLUB("Clube"), PIT_PASS("Pit Pass"),
+    ASSET_DETAIL("Detalhe de piloto/peça"), FEATURED("Recursos em destaque"), DUEL_SERIES("Séries de Duelos"),
+    PRE_RACE_TYRES("Escolha de pneus"), UNKNOWN("Desconhecida")
 }
 
 data class ParsedScreen(
@@ -203,6 +205,7 @@ object ScreenReader {
     private val GAME_SCREENS = setOf(
         GameScreen.HOME, GameScreen.RACE_MENU, GameScreen.GP, GameScreen.OBJECTIVES, GameScreen.TEAM_DRIVERS,
         GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE,
+        GameScreen.ASSET_DETAIL, GameScreen.FEATURED, GameScreen.DUEL_SERIES, GameScreen.PRE_RACE_TYRES,
     )
 
     private val TIMER_RE = Regex("""\b(\d{1,3})\s*(D|DIAS?|DAYS?|H|HRS?|HORAS?|M|MIN|MINS?)\b""")
