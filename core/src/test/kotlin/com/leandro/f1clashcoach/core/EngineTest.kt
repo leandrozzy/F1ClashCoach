@@ -181,3 +181,44 @@ class EngineTest {
         assertEquals("Guia", a.sources.single().title)
     }
 }
+
+class BriefingTest {
+    private val now = 1_800_000_000_000L
+
+    @Test fun parsesTimersAndModes() {
+        val p = ScreenReader.parse(listOf(
+            TextLine("GRAND PRIX", 0.3f, 0.05f, 0.6f, 0.1f),
+            TextLine("Brazilian Grand Prix", 0.3f, 0.12f, 0.7f, 0.18f),
+            TextLine("ENDS IN 2D 4H", 0.6f, 0.2f, 0.9f, 0.25f),
+            TextLine("REWARDS", 0.1f, 0.8f, 0.3f, 0.85f),
+        ))
+        assertEquals(GameScreen.EVENT, p.screen)
+        assertEquals(com.leandro.f1clashcoach.core.model.GameMode.GRAND_PRIX, p.mode)
+        assertEquals((2 * 24 + 4) * 3_600_000L, p.timeLeftMs)
+        assertEquals("Brazilian Grand Prix", p.title)
+        assertEquals((3 * 60 + 20) * 60_000L, ScreenReader.parseDuration("TERMINA EM 3H 20M"))
+        assertEquals(com.leandro.f1clashcoach.core.model.GameMode.F1_MOMENTS, com.leandro.f1clashcoach.core.model.GameMode.detect("F1 MOMENTS: SENNA 1993"))
+        assertEquals(com.leandro.f1clashcoach.core.model.GameMode.EXHIBITION, com.leandro.f1clashcoach.core.model.GameMode.detect("EXHIBITION RACE"))
+    }
+
+    @Test fun briefingPrioritizesUrgentThings() {
+        val events = listOf(
+            com.leandro.f1clashcoach.core.model.ActiveEvent("e1", com.leandro.f1clashcoach.core.model.GameMode.EVENT, "Forge the Future", endsAt = now + 5 * 3_600_000L, lastSeen = now),
+            com.leandro.f1clashcoach.core.model.ActiveEvent("e2", com.leandro.f1clashcoach.core.model.GameMode.GRAND_PRIX, "GP Brasil", endsAt = now + 3 * 86_400_000L, lastSeen = now),
+        )
+        val losses = (1..4).map { RaceRecord("r$it", now - it * 1000L, "monza", won = false) }
+        val items = com.leandro.f1clashcoach.core.engine.DailyBriefing.build(Garage(), losses, events, emptyList(), 0, now)
+        val top = items.filter { it.priority == 0 }.map { it.title }
+        assertTrue(top.any { it.contains("Forge the Future") && it.contains("5h") })
+        assertTrue(top.any { it.contains("derrotas seguidas") })
+        assertTrue(top.any { it.contains("garagem") })
+        assertTrue(items.none { it.title.contains("Confira o Grand Prix") })
+        assertTrue(items.any { it.title.contains("meta") })
+    }
+
+    @Test fun contextIncludesEvents() {
+        val ev = listOf(com.leandro.f1clashcoach.core.model.ActiveEvent("e", com.leandro.f1clashcoach.core.model.GameMode.F1_MOMENTS, "Senna 93", endsAt = now + 86_400_000L, lastSeen = now))
+        val ctx = CoachPrompts.accountContext(Garage(), emptyList(), null, ev, now)
+        assertTrue(ctx.contains("Momentos F1: Senna 93 (faltam 1d 0h)"))
+    }
+}

@@ -24,6 +24,7 @@ import com.leandro.f1clashcoach.core.ai.AiFactory
 import com.leandro.f1clashcoach.core.ai.AiImage
 import com.leandro.f1clashcoach.core.ai.AiRequest
 import com.leandro.f1clashcoach.core.ai.CoachPrompts
+import com.leandro.f1clashcoach.core.engine.DailyBriefing
 import com.leandro.f1clashcoach.core.engine.GameScreen
 import com.leandro.f1clashcoach.core.engine.LiveCoach
 import com.leandro.f1clashcoach.core.engine.ParsedScreen
@@ -32,6 +33,7 @@ import com.leandro.f1clashcoach.core.engine.RaceStrategist
 import com.leandro.f1clashcoach.core.engine.SetupOptimizer
 import com.leandro.f1clashcoach.core.engine.WearModel
 import com.leandro.f1clashcoach.core.model.DrivingPace
+import com.leandro.f1clashcoach.core.model.GameMode
 import com.leandro.f1clashcoach.core.model.RaceRecord
 import com.leandro.f1clashcoach.core.model.Track
 import com.leandro.f1clashcoach.core.model.Tyre
@@ -198,7 +200,47 @@ class CoachCaptureService : Service() {
             }
             GameScreen.RACE_RESULT -> onResult(p, settings.autoRecordResults)
             GameScreen.PARTS, GameScreen.DRIVERS, GameScreen.UPGRADE -> if (settings.autoScanGarage) scanGarage(p)
-            else -> overlay.setHeader("🏁 F1 Coach • ${p.screen.label}")
+            else -> {
+                val mode = p.mode
+                if (mode != null && mode != GameMode.CLUB && mode != GameMode.SEASON && p.title != null &&
+                    (p.screen == GameScreen.EVENT || p.timeLeftMs != null)
+                ) onEventScreen(p, mode, p.title!!)
+                else overlay.setHeader("🏁 F1 Coach • ${mode?.label ?: p.screen.label}")
+            }
+        }
+    }
+
+    private var lastAutoAiAt = 0L
+
+    /** Tela de evento/GP/exibição/momentos: registra, mostra a dica e pede análise automática à IA uma vez. */
+    private fun onEventScreen(p: ParsedScreen, mode: GameMode, title: String) {
+        val (ev, isNew) = app.store.upsertEvent(mode, title, p.timeLeftMs)
+        val left = ev.remainingMs(System.currentTimeMillis())?.let { " • faltam ${DailyBriefing.formatLeft(it)}" } ?: ""
+        overlay.setHeader("🎯 ${mode.label}$left")
+        if (isNew) {
+            LiveState.event("${mode.label} detectado: $title")
+            overlay.showMessage("${mode.label}: $title$left\n\n${mode.tip}", pin = false)
+        } else if (ev.aiAdvice.isNotBlank()) {
+            overlay.showMessage("${mode.label}: $title$left\n\n${ev.aiAdvice}", pin = false)
+        }
+        val s = app.settings.state.value
+        val now = System.currentTimeMillis()
+        if (ev.aiAdvice.isBlank() && s.activeKey.isNotBlank() && now - lastAutoAiAt > 90_000) {
+            lastAutoAiAt = now
+            val frame = LiveState.lastFrame ?: return
+            scope.launch {
+                runCatching {
+                    val d = app.store.data.value
+                    val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
+                    val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events)
+                    advisor.ask(AiRequest(CoachPrompts.system(), CoachPrompts.withContext(CoachPrompts.eventAnalysis(mode.label, title), ctx),
+                        image = AiImage(ImageUtils.toJpeg(frame), "image/jpeg"), webSearch = true))
+                }.onSuccess { a ->
+                    app.store.setEventAdvice(ev.id, a.text)
+                    overlay.showMessage("🤖 ${mode.label}: $title\n\n${a.text}")
+                    LiveState.event("IA analisou: $title")
+                }.onFailure { LiveState.event("IA não analisou $title: ${it.message}") }
+            }
         }
     }
 
@@ -263,9 +305,25 @@ class CoachCaptureService : Service() {
         )
         app.store.addRace(record)
         usedTyres.clear(); lastGrid = emptyList()
-        val txt = if (p.won == true) "🏆 Vitória registrada!" else "Derrota registrada — veja a análise em Evoluir."
+        val txt = if (p.won == true) "🏆 Vitória registrada!" else debrief(record)
         overlay.showMessage(txt, pin = false)
         LiveState.event("Resultado salvo: ${if (p.won == true) "vitória" else "derrota"} em ${currentTrack?.name ?: "?"}")
+    }
+
+    /** Diagnóstico rápido pós-derrota, sem internet. */
+    private fun debrief(r: RaceRecord): String {
+        val grid = r.gridPositions.takeIf { it.isNotEmpty() }?.average()
+        val fin = r.finishPositions.takeIf { it.isNotEmpty() }?.average()
+        val why = when {
+            grid != null && fin != null && fin > grid + 0.5 ->
+                "Você largou melhor do que chegou: perdeu posições na corrida. Revise pneus/paradas (aba Corrida) e use energia nas retas para defender."
+            grid != null && grid > 5 ->
+                "Largou atrás (média P${"%.0f".format(grid)}): o problema é a classificação. Priorize Qualifying nas peças e pilotos."
+            r.weather != Weather.DRY -> "Corrida com chuva: pare para o intermediário assim que a chuva chegar."
+            else -> "Confira na aba Evoluir os upgrades prioritários para esta série."
+        }
+        val streak = app.store.data.value.races.sortedByDescending { it.timestamp }.takeWhile { it.won == false }.size
+        return "Derrota registrada.\n$why" + if (streak >= 3) "\n🛑 $streak derrotas seguidas: pare a liga e evolua antes." else ""
     }
 
     private fun scanGarage(p: ParsedScreen) {
@@ -290,7 +348,7 @@ class CoachCaptureService : Service() {
             val text = try {
                 val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
                 val d = app.store.data.value
-                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack)
+                val ctx = CoachPrompts.accountContext(d.garage, d.races, currentTrack, d.events)
                 val prompt = CoachPrompts.withContext(
                     CoachPrompts.ANALYZE_SCREENSHOT + " Estou no meio do jogo: responda em no máximo 6 linhas curtas.", ctx,
                 )

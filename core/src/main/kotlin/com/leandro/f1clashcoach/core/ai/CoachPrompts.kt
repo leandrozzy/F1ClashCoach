@@ -1,8 +1,10 @@
 package com.leandro.f1clashcoach.core.ai
 
+import com.leandro.f1clashcoach.core.engine.DailyBriefing
 import com.leandro.f1clashcoach.core.engine.HistoryAnalyzer
 import com.leandro.f1clashcoach.core.engine.SetupOptimizer
 import com.leandro.f1clashcoach.core.engine.UpgradePlanner
+import com.leandro.f1clashcoach.core.model.ActiveEvent
 import com.leandro.f1clashcoach.core.model.Garage
 import com.leandro.f1clashcoach.core.model.RaceRecord
 import com.leandro.f1clashcoach.core.model.Track
@@ -27,11 +29,19 @@ Como trabalhar:
 - Separe "faça agora" de "planeje para depois".
 - O app só aconselha: nunca sugira automação, bots, auto-clicker ou qualquer coisa que viole os termos do jogo.
 
+Modos do jogo que você deve conhecer e orientar: Liga/Série (sobe de série), Grand Prix semanal (classificação + corridas, boosters), Eventos com marcos e prazo, Exibição (sem troféus, para testar), Momentos F1 (cenários com objetivo), Clube (pedir/doar cartas) e Temporada/Passe.
+
 Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Power Unit, Qualifying, tempo de Pit Stop, Overtake Mode), atributos dos pilotos (Overtaking, Defending, Qualifying, Race Start, Tyre Management), pneus (macio, médio, duro, intermediário, chuva), ritmo (conservar/neutro/atacar), energia da bateria, clima, Featured Assets, boosters, ligas, eventos e economia (moedas, bucks, caixas, cartas).
 """.trim()
 
     /** Resumo compacto da conta para colocar no prompt. */
-    fun accountContext(garage: Garage, history: List<RaceRecord>, focusTrack: Track? = null): String {
+    fun accountContext(
+        garage: Garage,
+        history: List<RaceRecord>,
+        focusTrack: Track? = null,
+        events: List<ActiveEvent> = emptyList(),
+        now: Long = System.currentTimeMillis(),
+    ): String {
         val sb = StringBuilder()
         sb.appendLine("## Conta")
         sb.appendLine("Série: ${garage.series} | Troféus: ${garage.trophies} | Moedas: ${garage.coins} | Bucks: ${garage.bucks}")
@@ -59,6 +69,11 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
             plan.doNow.take(5).forEach { sb.appendLine("- Agora: ${it.name} (${it.kind}) — ${it.reason}") }
             plan.collectCards.take(3).forEach { sb.appendLine("- Juntar cartas: ${it.name} — ${it.reason}") }
         }
+        val ev = DailyBriefing.eventsContext(events, now)
+        if (ev.isNotBlank()) {
+            sb.appendLine("## Eventos e modos vistos na tela (ativos)")
+            sb.appendLine(ev)
+        }
         if (focusTrack != null) {
             val setup = SetupOptimizer.optimize(garage, focusTrack)
             sb.appendLine("## Setup calculado para ${focusTrack.name} (${focusTrack.type.label})")
@@ -76,6 +91,12 @@ Mecânicas que você deve considerar: atributos das peças (Speed, Cornering, Po
     const val WEEKLY_META = "Pesquise na web o meta atual do F1 Clash para a minha série: melhores peças e pilotos, Featured Assets desta semana, estratégias de pneus das pistas da série e eventos ativos. Depois cruze com a minha garagem e diga o que eu devo usar, evoluir e jogar esta semana."
 
     const val EVOLUTION_PLAN = "Monte um plano de evolução de 7 dias para a minha conta: o que evoluir primeiro com as moedas que tenho, quais cartas buscar, quais eventos priorizar, e como gastar bucks com eficiência. Use o histórico para apontar meu maior ponto fraco."
+
+    /** Gerado automaticamente 1x por dia (ou quando aparece evento novo), sem o usuário pedir. */
+    const val DAILY_BRIEFING = "Monte meu BRIEFING DO DIA no F1 Clash, como um treinador. Pesquise na web o que está ativo agora (Grand Prix da semana, eventos, Momentos F1, Featured Assets, novidades da temporada) e cruze com a minha conta. Formato: 1) As 3 ações mais importantes de hoje, em ordem. 2) Eventos/GP ativos: como jogar cada um e se vale a pena para mim. 3) Upgrade do dia. 4) Um alerta sobre algo que eu esteja fazendo errado (pelo histórico). Seja curto e direto."
+
+    fun eventAnalysis(modeLabel: String, name: String): String =
+        "Esta é a tela do $modeLabel \"$name\" no F1 Clash. Leia regras, objetivo, pista, prazo e recompensas que aparecem no print, pesquise na web se precisar, e diga em até 8 linhas: vale a pena? como jogar (setup, pneus, energia, boosters)? o que fazer primeiro?"
 
     fun racePlan(track: Track, laps: Int, extra: String): String =
         "Vou correr em ${track.name} (${track.type.label}), $laps voltas. $extra Valide a estratégia calculada pelo app e diga ritmo, uso de energia e quando parar."

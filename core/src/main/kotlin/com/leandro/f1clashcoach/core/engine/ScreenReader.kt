@@ -2,6 +2,7 @@ package com.leandro.f1clashcoach.core.engine
 
 import com.leandro.f1clashcoach.core.model.CarStats
 import com.leandro.f1clashcoach.core.model.DriverStats
+import com.leandro.f1clashcoach.core.model.GameMode
 import com.leandro.f1clashcoach.core.model.PartSlot
 import com.leandro.f1clashcoach.core.model.Track
 import com.leandro.f1clashcoach.core.model.TrackCatalog
@@ -16,7 +17,7 @@ data class TextLine(val text: String, val left: Float = 0f, val top: Float = 0f,
 
 enum class GameScreen(val label: String) {
     RACE("Corrida"), QUALIFYING("Classificação"), PRE_RACE("Pré-corrida"), RACE_RESULT("Resultado"),
-    PARTS("Peças"), DRIVERS("Pilotos"), UPGRADE("Upgrade"), STORE("Loja"), EVENT("Evento"), MENU("Menu"), UNKNOWN("Desconhecida")
+    PARTS("Peças"), DRIVERS("Pilotos"), UPGRADE("Upgrade"), STORE("Loja"), EVENT("Evento / modo de jogo"), MENU("Menu"), UNKNOWN("Desconhecida")
 }
 
 data class ParsedScreen(
@@ -38,6 +39,12 @@ data class ParsedScreen(
     val driverStats: DriverStats? = null,
     val itemName: String? = null,
     val coins: Long? = null,
+    /** Modo de jogo identificado (liga, GP, evento, exibição, momentos…). */
+    val mode: GameMode? = null,
+    /** Título principal da tela (nome do evento/GP). */
+    val title: String? = null,
+    /** Tempo restante lido de um timer ("2d 4h", "3h 20m"), em ms. */
+    val timeLeftMs: Long? = null,
     val rawText: String = "",
 ) {
     fun toSnapshot(): RaceSnapshot {
@@ -63,7 +70,10 @@ object ScreenReader {
         GameScreen.DRIVERS to listOf("OVERTAKING", "DEFENDING", "TYRE MANAGEMENT", "RACE START", "ULTRAPASSAGEM", "DEFESA", "GESTÃO DE PNEUS", "LARGADA"),
         GameScreen.UPGRADE to listOf("UPGRADE", "MELHORAR", "EVOLUIR", "LEVEL UP", "SUBIR DE NÍVEL"),
         GameScreen.STORE to listOf("STORE", "SHOP", "LOJA", "CRATE", "CAIXA", "OFFER", "OFERTA", "BUCKS"),
-        GameScreen.EVENT to listOf("EVENT", "EVENTO", "GRAND PRIX", "GRANDE PRÊMIO", "REWARDS", "RECOMPENSAS"),
+        GameScreen.EVENT to listOf(
+            "EVENT", "EVENTO", "GRAND PRIX", "GRANDE PRÊMIO", "REWARDS", "RECOMPENSAS", "EXHIBITION", "EXIBIÇÃO",
+            "F1 MOMENTS", "MOMENTOS", "ENDS IN", "TERMINA EM", "MILESTONE", "MARCO", "OBJECTIVE", "OBJETIVO",
+        ),
         GameScreen.MENU to listOf("GARAGE", "GARAGEM", "LEAGUE", "LIGA", "CLUB", "CLUBE", "RACE NOW", "CORRER"),
     )
 
@@ -163,6 +173,12 @@ object ScreenReader {
                 .maxByOrNull { it.length }
         } else null
 
+        val mode = GameMode.detect(text)
+        val title = sorted.filter { it.top < 0.25f }
+            .map { it.text.trim() }
+            .filter { t -> t.length in 4..40 && t.count { it.isLetter() } >= 4 && !TIMER_RE.containsMatchIn(t.uppercase()) }
+            .maxByOrNull { it.length }
+
         return ParsedScreen(
             screen = screen,
             track = TrackCatalog.match(text),
@@ -173,8 +189,31 @@ object ScreenReader {
             level = LEVEL_RE.find(text)?.groupValues?.get(1)?.toIntOrNull(),
             cards = cards, slot = slot, carStats = carStats, driverStats = driverStats, itemName = itemName,
             coins = COINS_RE.find(text)?.groupValues?.get(1)?.replace(".", "")?.replace(",", "")?.toLongOrNull(),
+            mode = mode, title = title, timeLeftMs = parseDuration(text),
             rawText = text,
         )
+    }
+
+    private val TIMER_RE = Regex("""\b(\d{1,3})\s*(D|DIAS?|DAYS?|H|HRS?|HORAS?|M|MIN|MINS?)\b""")
+
+    /** Lê o primeiro timer da tela ("2D 4H", "3h 20m", "5 dias") e devolve em ms. */
+    fun parseDuration(upperText: String): Long? {
+        val matches = TIMER_RE.findAll(upperText).toList()
+        if (matches.isEmpty()) return null
+        // Agrupa tokens vizinhos (ex.: "2D 4H") a partir do primeiro.
+        var total = 0L
+        var lastEnd = -1
+        for (m in matches) {
+            if (lastEnd >= 0 && m.range.first - lastEnd > 2) break
+            val n = m.groupValues[1].toLong()
+            total += when (m.groupValues[2].first()) {
+                'D' -> n * 86_400_000L
+                'H' -> n * 3_600_000L
+                else -> n * 60_000L
+            }
+            lastEnd = m.range.last + 1
+        }
+        return total.takeIf { it > 0 }
     }
 
     private fun isLabel(t: String): Boolean =

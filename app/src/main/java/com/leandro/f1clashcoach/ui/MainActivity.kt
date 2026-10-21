@@ -169,7 +169,7 @@ fun AppRoot(
             SubScreen.NEWS -> NewsScreen(vm, m, onOpenUrl, goAi)
             SubScreen.SETTINGS -> SettingsScreen(vm, m)
             null -> when (tab) {
-                Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, goAi)
+                Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, { tab = it; sub = null }, onOpenUrl)
                 Tab.GARAGE -> GarageScreen(vm, m)
                 Tab.RACE -> RaceScreen(vm, m, goAi)
                 Tab.EVOLVE -> EvolveScreen(vm, m, goAi)

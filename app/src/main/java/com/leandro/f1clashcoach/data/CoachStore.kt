@@ -2,7 +2,9 @@ package com.leandro.f1clashcoach.data
 
 import android.content.Context
 import com.leandro.f1clashcoach.core.ai.ChatTurn
+import com.leandro.f1clashcoach.core.model.ActiveEvent
 import com.leandro.f1clashcoach.core.model.CarStats
+import com.leandro.f1clashcoach.core.model.GameMode
 import com.leandro.f1clashcoach.core.model.Driver
 import com.leandro.f1clashcoach.core.model.DriverStats
 import com.leandro.f1clashcoach.core.model.Garage
@@ -35,6 +37,11 @@ data class CoachData(
     val daily: DailyCheck = DailyCheck(),
     val lastMeta: String = "",
     val lastMetaTime: Long = 0,
+    val events: List<ActiveEvent> = emptyList(),
+    /** Briefing diário gerado automaticamente pela IA. */
+    val aiBriefing: String = "",
+    val aiBriefingSources: List<String> = emptyList(),
+    val aiBriefingTime: Long = 0,
 )
 
 /** Tudo que o Coach sabe fica neste arquivo JSON, no próprio aparelho. */
@@ -117,6 +124,30 @@ class CoachStore(context: Context) {
     fun addRace(r: RaceRecord) = update { d -> d.copy(races = (d.races + r).takeLast(2000)) }
     fun removeRace(id: String) = update { d -> d.copy(races = d.races.filterNot { it.id == id }) }
     fun addTyreObservation(o: TyreObservation) = update { d -> d.copy(tyreObservations = (d.tyreObservations + o).takeLast(3000)) }
+
+    // ---------- Eventos / modos ----------
+    /** Registra um evento visto na tela. Retorna o evento e se é novo. */
+    fun upsertEvent(mode: GameMode, name: String, timeLeftMs: Long?, now: Long = System.currentTimeMillis()): Pair<ActiveEvent, Boolean> {
+        val key = (mode.name + ":" + name.trim().lowercase()).replace(Regex("\\s+"), " ")
+        val cur = _data.value.events.firstOrNull { it.id == key }
+        val ev = (cur ?: ActiveEvent(key, mode, name.trim(), firstSeen = now)).copy(
+            lastSeen = now,
+            endsAt = timeLeftMs?.let { now + it } ?: cur?.endsAt,
+        )
+        update { d ->
+            val others = d.events.filterNot { it.id == key || it.isOver(now) }
+            d.copy(events = (others + ev).takeLast(30))
+        }
+        return ev to (cur == null)
+    }
+
+    fun setEventAdvice(id: String, advice: String) = update { d ->
+        d.copy(events = d.events.map { if (it.id == id) it.copy(aiAdvice = advice, aiAdviceAt = System.currentTimeMillis()) else it })
+    }
+
+    fun removeEvent(id: String) = update { d -> d.copy(events = d.events.filterNot { it.id == id }) }
+
+    fun setBriefing(text: String, sources: List<String>) = update { it.copy(aiBriefing = text, aiBriefingSources = sources, aiBriefingTime = System.currentTimeMillis()) }
 
     // ---------- Chat ----------
     fun addChat(m: ChatMessage) = update { d -> d.copy(chat = (d.chat + m).takeLast(200)) }
