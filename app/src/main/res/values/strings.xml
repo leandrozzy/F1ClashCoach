@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">F1 Clash Coach</string>
+    <string name="a11y_label">F1 Clash Coach — leitura do jogo</string>
+    <string name="a11y_description">Lê a tela do F1 Clash (só enquanto o jogo está aberto) para mostrar dicas, montar o plano do dia e registrar corridas. A leitura é feita no próprio aparelho; nada é enviado sem você pedir.</string>
 </resources>

@@ -61,8 +61,8 @@ fun AiScreen(vm: MainViewModel, modifier: Modifier, onOpenUrl: (String) -> Unit)
     LaunchedEffect(data.chat.size) { if (data.chat.isNotEmpty()) listState.animateScrollToItem(data.chat.size - 1) }
 
     Column(modifier.fillMaxSize()) {
-        if (settings.activeKey.isBlank()) {
-            Text("⚙️ Configure sua chave de IA em Ajustes (ícone de engrenagem). Claude é o padrão; Gemini tem plano gratuito.",
+        if (!com.leandro.f1clashcoach.ai.AiClient.hasAnyKey(androidx.compose.ui.platform.LocalContext.current)) {
+            Text("⚙️ Conecte uma IA grátis em Ajustes (engrenagem): Gemini ou Groq. Se uma falhar, uso a próxima.",
                 color = Warn, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {

@@ -41,8 +41,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.IntentCompat
 import com.leandro.f1clashcoach.CoachApp
+import com.leandro.f1clashcoach.capture.CoachAccessibilityService
 import com.leandro.f1clashcoach.capture.CoachCaptureService
 import com.leandro.f1clashcoach.capture.LiveState
 
@@ -59,6 +62,7 @@ enum class SubScreen(val title: String) { NEWS("Notícias e guias"), SETTINGS("A
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
     private val openAiTab = mutableStateOf(false)
+    private val a11yGuide = mutableStateOf(false)
 
     private val projectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val data = res.data
@@ -81,6 +85,11 @@ class MainActivity : ComponentActivity() {
                 AppRoot(vm, openAiTab = openAiTab.value, onAiTabOpened = { openAiTab.value = false },
                     onStartCoach = ::startCoach, onStopCoach = { CoachCaptureService.stop(this) }, onOpenGame = ::launchF1Clash,
                     onOpenUrl = { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) })
+                if (a11yGuide.value) AccessibilityGuide(
+                    onOpenAccessibility = { a11yGuide.value = false; startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                    onOpenAppInfo = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
+                    onDismiss = { a11yGuide.value = false },
+                )
             }
         }
     }
@@ -101,6 +110,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCoach() {
+        // Android 11+: leitura pela acessibilidade (igual ao OSM Coach), sem pedir gravação de tela toda vez.
+        if (CoachAccessibilityService.supported) {
+            if (CoachAccessibilityService.isEnabled(this)) launchF1Clash() else a11yGuide.value = true
+            return
+        }
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Permita \"Sobrepor a outros apps\" para o F1 Clash Coach e toque em Iniciar de novo.", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -144,7 +158,8 @@ fun AppRoot(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(sub?.title ?: if (tab == Tab.HOME) "F1 Clash Coach" else tab.label) },
+                title = { Text(sub?.title ?: if (tab == Tab.HOME) "🏁 F1 Clash Coach" else tab.label, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Navy),
                 navigationIcon = {
                     if (sub != null) IconButton(onClick = { sub = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
                 },
@@ -155,7 +170,7 @@ fun AppRoot(
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = Panel) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(selected = sub == null && tab == t, onClick = { tab = t; sub = null },
                         icon = { Icon(t.icon, t.label) }, label = { Text(t.label) })
@@ -169,7 +184,8 @@ fun AppRoot(
             SubScreen.NEWS -> NewsScreen(vm, m, onOpenUrl, goAi)
             SubScreen.SETTINGS -> SettingsScreen(vm, m)
             null -> when (tab) {
-                Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, { tab = it; sub = null }, onOpenUrl)
+                Tab.HOME -> HomeScreen(vm, m, LiveState.status.collectAsState().value, onStartCoach, onStopCoach, onOpenGame, { tab = it; sub = null }, onOpenUrl,
+                    onOpenSettings = { sub = SubScreen.SETTINGS })
                 Tab.GARAGE -> GarageScreen(vm, m)
                 Tab.RACE -> RaceScreen(vm, m, goAi)
                 Tab.EVOLVE -> EvolveScreen(vm, m, goAi)
@@ -177,4 +193,24 @@ fun AppRoot(
             }
         }
     }
+}
+
+@Composable
+fun AccessibilityGuide(onOpenAccessibility: () -> Unit, onOpenAppInfo: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ligar a leitura do jogo") },
+        text = {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                SetupStep(1, false, "Abra a Acessibilidade", "Toque no botão abaixo.", null) {}
+                SetupStep(2, false, "Apps instalados", "Pode se chamar \"Serviços baixados\" ou \"Apps baixados\".", null) {}
+                SetupStep(3, false, "F1 Clash Coach — leitura do jogo", "Ative a chave e confirme em Permitir.", null) {}
+                Text("Se o Android disser \"Configuração restrita\": toque em Info do app › menu ⋮ › Permitir configurações restritas e tente de novo.",
+                    fontSize = 12.sp, color = Warn)
+                Text("Depois é só abrir o F1 Clash: o painel aparece sozinho e some quando você sai do jogo.", fontSize = 12.sp, color = Muted)
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onOpenAccessibility) { Text("Abrir Acessibilidade") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onOpenAppInfo) { Text("Info do app") } },
+    )
 }

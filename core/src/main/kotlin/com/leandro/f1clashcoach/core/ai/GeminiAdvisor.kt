@@ -90,7 +90,7 @@ class GeminiAdvisor(private val apiKey: String, private val model: String = DEFA
     }
 
     companion object {
-        const val DEFAULT_MODEL = "gemini-flash-latest"
+        const val DEFAULT_MODEL = "gemini-2.5-flash"
         private val json = Json { ignoreUnknownKeys = true }
 
         fun parse(raw: String): AiAnswer {

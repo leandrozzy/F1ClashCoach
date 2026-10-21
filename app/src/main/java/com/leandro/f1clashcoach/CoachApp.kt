@@ -15,6 +15,8 @@ class CoachApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.leandro.f1clashcoach.ai.Health.install(this)
+        com.leandro.f1clashcoach.ai.AiKeys.migrateFromOld(this)
         store = CoachStore(this)
         settings = Settings(this)
         val nm = getSystemService(NotificationManager::class.java)

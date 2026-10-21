@@ -7,7 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.leandro.f1clashcoach.CoachApp
 import com.leandro.f1clashcoach.capture.ImageUtils
 import com.leandro.f1clashcoach.capture.OcrEngine
-import com.leandro.f1clashcoach.core.ai.AiFactory
+import com.leandro.f1clashcoach.ai.AiClient
+import com.leandro.f1clashcoach.ai.AiHub
 import com.leandro.f1clashcoach.core.ai.AiImage
 import com.leandro.f1clashcoach.core.ai.AiRequest
 import com.leandro.f1clashcoach.core.ai.CoachPrompts
@@ -59,8 +60,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _aiBusy.value = true
         viewModelScope.launch {
             try {
-                val s = settings.state.value
-                val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
+                val advisor = AiHub(app)
                 val d = store.data.value
                 val history = d.chat.dropLast(1).map { it.toTurn() }
                 val image = imageUri?.let { uri ->
@@ -89,8 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * sem o usuário precisar perguntar. [force] = botão "atualizar".
      */
     fun autoBriefing(force: Boolean = false) {
-        val s = settings.state.value
-        if (s.activeKey.isBlank() || _briefingBusy.value) return
+        if (!AiClient.hasAnyKey(app) || _briefingBusy.value) return
         val d = store.data.value
         val today = LocalDate.now().toString()
         val lastDay = if (d.aiBriefingTime == 0L) "" else java.time.Instant.ofEpochMilli(d.aiBriefingTime).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
@@ -100,7 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _briefingError.value = null
         viewModelScope.launch {
             try {
-                val advisor = AiFactory.create(s.provider, s.activeKey, s.activeModel)
+                val advisor = AiHub(app)
                 val prompt = CoachPrompts.withContext(CoachPrompts.DAILY_BRIEFING, CoachPrompts.accountContext(d.garage, d.races, null, d.events, System.currentTimeMillis(), d.objectives, d.gp, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.flags))
                 val a = advisor.ask(AiRequest(CoachPrompts.system(), prompt, webSearch = true))
                 store.setBriefing(a.text, a.sources.map { "${it.title}|${it.url}" })
@@ -138,6 +137,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ocr.close()
             }
             toast("Lidos: $parts peças, $drivers pilotos, $results resultados" + if (unknown > 0) " • $unknown prints não reconhecidos (use o Coach IA para eles)" else "")
+        }
+    }
+
+    private val _aiTest = MutableStateFlow<String?>(null)
+    val aiTest: StateFlow<String?> = _aiTest
+    private val _aiTesting = MutableStateFlow(false)
+    val aiTesting: StateFlow<Boolean> = _aiTesting
+
+    /** Testa todas as IAs com chave (lê imagem, responde texto, busca na web), como no OSM. */
+    fun testAi() {
+        if (_aiTesting.value) return
+        _aiTesting.value = true
+        _aiTest.value = null
+        viewModelScope.launch {
+            _aiTest.value = try { AiClient.test(app) } catch (e: Exception) { "Erro: ${e.message}" }
+            _aiTesting.value = false
         }
     }
 

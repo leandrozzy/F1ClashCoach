@@ -23,17 +23,26 @@ import androidx.compose.ui.unit.sp
 val F1Red = Color(0xFFE10600)
 val Good = Color(0xFF2ECC71)
 val Warn = Color(0xFFF1C40F)
-val Muted = Color(0xFF9AA0A6)
+val Muted = Color(0xFF9AA7BD)
+val Navy = Color(0xFF0B1220)
+val Panel = Color(0xFF131C2E)
+val PanelHi = Color(0xFF1B2740)
+val Line = Color(0xFF26324A)
+val Sky = Color(0xFF3FA9F5)
+val Gold = Color(0xFFF5C542)
 
 private val scheme = darkColorScheme(
     primary = F1Red,
     onPrimary = Color.White,
     secondary = Color(0xFF00A3E0),
-    background = Color(0xFF0F1115),
-    surface = Color(0xFF171A21),
-    surfaceVariant = Color(0xFF20242D),
-    onBackground = Color(0xFFECEDEF),
-    onSurface = Color(0xFFECEDEF),
+    background = Navy,
+    surface = Panel,
+    surfaceVariant = PanelHi,
+    surfaceContainer = Panel,
+    onBackground = Color(0xFFEAF0FA),
+    onSurface = Color(0xFFEAF0FA),
+    onSurfaceVariant = Color(0xFFB8C4D9),
+    outline = Line,
 )
 
 @Composable
@@ -45,10 +54,11 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, action: (@Composab
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Line),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
                 action?.invoke()
             }
             content()

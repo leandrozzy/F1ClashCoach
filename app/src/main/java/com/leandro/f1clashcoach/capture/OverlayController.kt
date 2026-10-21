@@ -26,6 +26,8 @@ class OverlayController(
     private val context: Context,
     private val onAskAi: () -> Unit,
     private val onStop: () -> Unit,
+    /** Dentro do serviço de acessibilidade: não precisa da permissão de sobrepor e some na hora da foto. */
+    private val accessibility: Boolean = false,
 ) {
     private val wm = context.getSystemService(WindowManager::class.java)
     private var root: LinearLayout? = null
@@ -39,20 +41,32 @@ class OverlayController(
     private val params = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT,
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_SECURE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        if (accessibility) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        // FLAG_SECURE faria o print da acessibilidade falhar: lá o painel some (alpha 0) na hora da foto.
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            (if (accessibility) 0 else WindowManager.LayoutParams.FLAG_SECURE),
         PixelFormat.TRANSLUCENT,
     ).apply {
         gravity = Gravity.TOP or Gravity.START
         x = 24; y = 120
     }
 
-    fun canShow(): Boolean = Settings.canDrawOverlays(context)
+    fun canShow(): Boolean = accessibility || Settings.canDrawOverlays(context)
+
+    val isShown: Boolean get() = root != null
+    private var shownAlpha = 0.9f
+
+    /** Esconde o painel por um instante (foto da tela sem o painel por cima). Chamar na thread principal. */
+    fun setHidden(hidden: Boolean): Boolean {
+        val r = root ?: return false
+        if (hidden) { if (r.alpha == 0f) return false; r.alpha = 0f } else r.alpha = shownAlpha
+        return true
+    }
 
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     fun show(alpha: Float) {
         if (root != null || !canShow()) return
+        shownAlpha = alpha
         val dp = context.resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
 
