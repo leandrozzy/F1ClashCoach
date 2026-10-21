@@ -3,6 +3,7 @@ package com.leandro.f1clashcoach.core.engine
 import com.leandro.f1clashcoach.core.model.CarStats
 import com.leandro.f1clashcoach.core.model.DriverStats
 import com.leandro.f1clashcoach.core.model.PartSlot
+import com.leandro.f1clashcoach.core.model.Weather
 import java.text.Normalizer
 import kotlin.math.abs
 import kotlin.math.max
@@ -182,6 +183,10 @@ data class GameRead(
     val tyreLapTimes: Map<String, Map<com.leandro.f1clashcoach.core.model.Tyre, Double>> = emptyMap(),
     val tyreLapRanges: Map<com.leandro.f1clashcoach.core.model.Tyre, IntRange> = emptyMap(),
     val totalLaps: Int? = null,
+    val race: RaceHud? = null,
+    val duel: DuelResult? = null,
+    /** Pontuação da equipe do rival na tela de pareamento. */
+    val rivalTeamScore: Int? = null,
 )
 
 object GameReader {
@@ -219,6 +224,11 @@ object GameReader {
         fun h(vararg kws: String) = kws.count { Txt.has(all, it) }
         val tabs = h("PILOTOS", "CARROS", "REFORCOS")
         return when {
+            h("VENCEDOR") >= 1 || (h("RESULTADOS") >= 1 && Regex("""\d{1,3}PTS""").containsMatchIn(all)) -> GameScreen.RACE_RESULT
+            (h("LIDERANDO", "TOQUEPARAMUDAR", "PITSTOP", "TROCANDOPNEUS") >= 2 ||
+                (h("LIDERANDO") >= 1 && (Regex("""\bFIM\b""").containsMatchIn(all) || all.contains("KMH")))) && Regex("""VOLT""").containsMatchIn(all) -> GameScreen.RACE
+            h("ESTATQUALIFICACAO") >= 1 && h("TEMPO") >= 1 -> GameScreen.QUALIFYING
+            h("PROCURANDOPORRIVAL") >= 1 || Regex("""PONTUACAODAEQUIPE.*PONTUACAODAEQUIPE""").containsMatchIn(all) && h("VITORIA") == 0 && h("CONFIGURACOESDEEQUIPE") == 0 -> GameScreen.PRE_RACE
             h("OSRECURSOSEMDESTAQUERECEBEM", "RECEBEMUMAUMENTO") >= 1 -> GameScreen.FEATURED
             h("DISPONIVELEM") >= 1 && h("ESTATNONIVELMAX", "ESTATISTICASDOPILOTOATUAL", "ESTATISTICASDAPECAATUAL", "COLETEMAIS", "ATRIBUIRAOCARRO") >= 1 &&
                 h("CONFIGURACOESDEEQUIPE") == 0 -> GameScreen.ASSET_DETAIL
@@ -269,6 +279,13 @@ object GameReader {
             GameScreen.STORE -> r = r.copy(featured = featured(ls))
             GameScreen.BOOSTERS -> r = r.copy(boosters = boosters(ls))
             GameScreen.CLUB -> r = readClub(ls, all, r)
+            GameScreen.RACE -> r = r.copy(race = readRace(ls))
+            GameScreen.RACE_RESULT -> r = r.copy(duel = readDuel(ls, all))
+            GameScreen.PRE_RACE -> r = r.copy(
+                teamScore = null,
+                rivalTeamScore = ls.filter { it.cx > 0.5f && Regex("""^\d{3,4}$""").matches(it.t.text.trim()) && it.t.top in 0.5f..0.62f }.firstNotNullOfOrNull { it.t.text.trim().toIntOrNull() },
+                flags = ls.firstOrNull { it.cx < 0.5f && it.t.top in 0.6f..0.66f && Regex("""^\d[.,]?\d{3}$""").matches(it.t.text.trim()) }?.let { Txt.bigNumber(it.t.text)?.toInt() },
+            )
             GameScreen.ASSET_DETAIL -> r = r.copy(asset = readAsset(ls, all))
             GameScreen.FEATURED -> r = r.copy(featured = featuredInfo(ls))
             GameScreen.DUEL_SERIES -> r = readSeries(ls, r)
@@ -544,9 +561,152 @@ object GameReader {
             !l.t.text.contains("%") && l.t.top > 0.3f && l.t.top < 0.85f
         }.map { it.t.text.trim() }.distinctBy { Txt.compact(it) }
 
-    private fun readSeries(ls: List<L>, base: GameRead): GameRead = base // calibrado com o vídeo da corrida (ver readSeriesCards)
+    private val SERIES_NAMES = listOf(
+        "GRANDSLAMDEOURO" to 12, "GRANDSLAMDEPRATA" to 11, "GRANDSLAMDEBRONZE" to 10, "VELOCIDADETERMINAL" to 9,
+        "INOVACAO" to 8, "PLATAFORMADELANCAMENTO" to 7, "ACELERACAOMAXIMA" to 6, "MANTERPOSICAO" to 5,
+    )
 
-    private fun readTyres(ls: List<L>, all: String, base: GameRead): GameRead = base
+    /** Cartão central da seleção de séries de Duelos. */
+    private fun readSeries(ls: List<L>, base: GameRead): GameRead {
+        val flags = ls.firstOrNull { it.t.top in 0.04f..0.08f && it.cx in 0.3f..0.5f && Regex("""^\d[.,]?\d{3}$""").matches(it.t.text.trim()) }
+            ?.let { Txt.bigNumber(it.t.text)?.toInt() }
+        val cards = ls.filter { Txt.has(it.c, "VITORIA") && it.t.left in 0.04f..0.45f }.mapNotNull { vit ->
+            val x0 = vit.t.left - 0.04f; val x1 = vit.t.left + 0.8f
+            val inCard = ls.filter { it.t.left >= x0 && it.t.left <= x1 }
+            fun under(lbl: String) = inCard.firstOrNull { Txt.has(it.c, lbl) }?.let { l ->
+                inCard.firstOrNull { it.cy > l.cy && it.cy - l.cy < 0.035f && abs(it.cx - l.cx) < 0.12f }
+            }
+            val win = under("VITORIA")?.let { Regex("""\+(\d{1,3})""").find(it.t.text)?.groupValues?.get(1)?.toIntOrNull() }
+            val loss = under("DERROTA")?.let { Regex("""-\s?(\d{1,3})""").find(it.t.text)?.groupValues?.get(1)?.toIntOrNull() }
+            val nameLine = inCard.firstOrNull { l -> SERIES_NAMES.any { (k, _) -> Txt.has(l.c, k.take(min(k.length, 13))) } }
+            val number = nameLine?.let { l -> SERIES_NAMES.firstOrNull { (k, _) -> Txt.has(l.c, k.take(min(k.length, 13))) }?.second }
+                ?: return@mapNotNull null
+            val range = inCard.firstOrNull { sameRow(it, vit).not() && it.cy < vit.cy && vit.cy - it.cy < 0.05f && Regex("""^\d{3,4}\s?-\s?\d{3,4}$""").matches(it.t.text.trim()) }
+                ?.t?.text?.split("-")?.mapNotNull { it.trim().toIntOrNull() }
+            val track = inCard.firstOrNull { it.t.top in 0.56f..0.61f && it.t.text.count { c -> c.isLetter() } >= 5 && !Txt.has(it.c, "VOLTAS") }?.t?.text?.trim()
+            val laps = inCard.firstOrNull { it.t.top in 0.56f..0.61f && Txt.has(it.c, "VOLTAS") }?.let { Regex("""(\d{1,2})""").find(it.t.text)?.value?.toIntOrNull() }
+            val premios = inCard.firstOrNull { Txt.has(it.c, "PREMIOS") || it.c.startsWith("PRE") && it.t.top in 0.69f..0.73f }
+            val prizeCoins = premios?.let { p -> inCard.filter { sameRow(it, p) && it.cx > p.cx }.firstNotNullOfOrNull { Txt.bigNumber(it.t.text)?.takeIf { v -> v >= 10_000 } } }
+            val stars = premios?.let { p -> inCard.filter { sameRow(it, p) && it.cx > p.cx + 0.3f && Regex("""^\D?\d{2,3}$""").matches(it.t.text.trim()) }.firstNotNullOfOrNull { Regex("""\d{2,3}""").find(it.t.text)?.value?.toIntOrNull() } }
+            val unlock = inCard.firstOrNull { it.t.top in 0.72f..0.76f && Regex("""^\d{1,3}(?:[.,]\d{3})*$""").matches(it.t.text.trim()) }?.let { Txt.bigNumber(it.t.text)?.toInt() }
+            val entry = labelLine(inCard, "ENTRADA")?.let { e -> inCard.filter { sameRow(it, e) && it !== e }.firstNotNullOfOrNull { Txt.bigNumber(it.t.text) } }
+            val focus = inCard.filter { it.t.top in 0.63f..0.69f && it.t.text.count { c -> c.isLetter() } >= 5 && !Txt.has(it.c, "ESTATS") }.map { it.t.text.trim() }
+            com.leandro.f1clashcoach.core.model.SeriesInfo(
+                number, SERIES_NAMES.first { it.second == number }.first.let { com.leandro.f1clashcoach.core.model.SeriesCatalog.defaults.firstOrNull { d -> d.number == number }?.name ?: it },
+                trackName = track ?: "", laps = laps, scoreMin = range?.getOrNull(0), scoreMax = range?.getOrNull(1), winFlags = win, lossFlags = loss,
+                prizeCoins = prizeCoins, prizeStars = stars, entryFee = entry, flagsToUnlock = unlock ?: (if (entry != null) 0 else null), statFocus = focus,
+            )
+        }
+        return base.copy(seriesCards = cards, flags = flags)
+    }
+
+    private val LAPTIME = Regex("""(\d{2})[.:](\d{2})[.:](\d{3})""")
+
+    /** Escolha de pneu antes da largada: tempos de volta por composto e faixa de voltas. */
+    private fun readTyres(ls: List<L>, all: String, base: GameRead): GameRead {
+        val headers = ls.mapNotNull { l ->
+            val t = when {
+                Txt.has(l.c, "SOFT") -> com.leandro.f1clashcoach.core.model.Tyre.SOFT
+                Txt.has(l.c, "MEDIUM") -> com.leandro.f1clashcoach.core.model.Tyre.MEDIUM
+                l.c.endsWith("HARD") && l.c.length <= 6 -> com.leandro.f1clashcoach.core.model.Tyre.HARD
+                l.c.endsWith("WET") && l.c.length <= 5 -> com.leandro.f1clashcoach.core.model.Tyre.WET
+                Txt.has(l.c, "INTER") -> com.leandro.f1clashcoach.core.model.Tyre.INTER
+                else -> null
+            }
+            t?.let { l to it }
+        }
+        val names = ls.filter { DRIVER_NAME.matches(it.t.text.trim()) && it.t.top < 0.35f }
+        val times = LinkedHashMap<String, MutableMap<com.leandro.f1clashcoach.core.model.Tyre, Double>>()
+        val ranges = LinkedHashMap<com.leandro.f1clashcoach.core.model.Tyre, IntRange>()
+        for (l in ls) {
+            val m = LAPTIME.find(l.t.text) ?: continue
+            val h = headers.filter { it.first.cy < l.cy && abs(it.first.cx - l.cx) < 0.2f }.maxByOrNull { it.first.cy } ?: continue
+            val driver = names.minByOrNull { abs(it.cx - l.cx) }?.t?.text?.trim() ?: if (l.cx < 0.5f) "Piloto 1" else "Piloto 2"
+            val sec = m.groupValues[1].toInt() * 60 + m.groupValues[2].toInt() + m.groupValues[3].toInt() / 1000.0
+            times.getOrPut(driver) { LinkedHashMap() }[h.second] = sec
+        }
+        for (l in ls) {
+            val m = Regex("""VOLTA\w?\s*(\d)\s*-\s*(\d)""").find(Txt.fold(l.t.text)) ?: continue
+            val h = headers.filter { it.first.cy < l.cy && abs(it.first.cx - l.cx) < 0.25f }.maxByOrNull { it.first.cy } ?: continue
+            ranges.putIfAbsent(h.second, m.groupValues[1].toInt()..m.groupValues[2].toInt())
+        }
+        return base.copy(tyreLapTimes = times, tyreLapRanges = ranges)
+    }
+
+    private val LAP_FRAC = Regex("""^(\d{1,2})\s*[/1Il|]\s*(\d{1,2})$""")
+
+    private fun readRace(ls: List<L>): RaceHud {
+        val lapLine = ls.firstOrNull { it.t.top < 0.06f && it.cx in 0.38f..0.62f && LAP_FRAC.matches(it.t.text.trim()) }
+        var lap: Int? = null; var total: Int? = null
+        lapLine?.let { l ->
+            val t = l.t.text.trim()
+            val m = Regex("""^(\d{1,2})\s*/\s*(\d{1,2})$""").find(t) ?: LAP_FRAC.find(t)
+            if (m != null) { lap = m.groupValues[1].toInt(); total = m.groupValues[2].toInt() }
+            if (lap != null && total != null && lap!! > total!!) { lap = null; total = null }
+        }
+        val topBand = ls.filter { it.t.top < 0.09f }
+        val rain = topBand.firstOrNull { it.cx in 0.25f..0.48f && Regex("""^\d{1,3}\s?%$""").matches(it.t.text.trim()) }
+            ?.let { Regex("""\d{1,3}""").find(it.t.text)?.value?.toIntOrNull() }
+        val temp = topBand.firstOrNull { it.t.text.contains("°") || it.t.text.contains("℃") }?.let { Regex("""(\d{2})\s?°?""").findAll(it.t.text).lastOrNull()?.groupValues?.get(1)?.toIntOrNull() }
+        val word = topBand.firstOrNull { it.cx in 0.1f..0.3f && it.t.text.count { c -> c.isLetter() } >= 3 && !it.t.text.contains("F1") && it.t.top > 0.04f }?.t?.text?.trim()
+        val wc = word?.let { Txt.compact(it) } ?: ""
+        val weather = when {
+            Txt.has(wc, "TEMPESTADE") || Txt.has(wc, "CHUVAFORTE") || Txt.has(wc, "HEAVY") -> Weather.HEAVY_RAIN
+            wc.contains("CHUV") || wc.contains("GAROA") || wc.contains("RAIN") -> Weather.LIGHT_RAIN
+            else -> Weather.DRY
+        }
+        val timeLeft = topBand.firstOrNull { it.cx in 0.48f..0.65f && Regex("""^\d{1,2}:\d{2}$""").matches(it.t.text.trim()) }?.t?.text?.trim()
+        val messages = ls.filter { it.t.top in 0.08f..0.13f && it.t.text.count { c -> c.isLetter() } >= 5 && !Txt.has(it.c, "TOQUEPARAMUDAR") && !Txt.has(it.c, "PADRAO") }.map { it.t.text.trim() }
+        val msgAll = Txt.compact(messages.joinToString(" "))
+        val rivalTyre = if (Txt.has(msgAll, "RIVAL") && Txt.has(msgAll, "TROCANDO")) when {
+            msgAll.contains("SOFT") -> com.leandro.f1clashcoach.core.model.Tyre.SOFT
+            msgAll.contains("MEDIUM") -> com.leandro.f1clashcoach.core.model.Tyre.MEDIUM
+            msgAll.contains("HARD") -> com.leandro.f1clashcoach.core.model.Tyre.HARD
+            msgAll.contains("WET") -> com.leandro.f1clashcoach.core.model.Tyre.WET
+            msgAll.contains("INTER") -> com.leandro.f1clashcoach.core.model.Tyre.INTER
+            else -> null
+        } else null
+        val allC = ls.joinToString(" ") { it.c }
+
+        fun side(left: Boolean): DriverHud {
+            val hs = ls.filter { (it.cx < 0.5f) == left && it.t.top > 0.7f }
+            val ers = hs.firstOrNull { it.t.top in 0.72f..0.79f && Regex("""^\d{1,3}\s?%$""").matches(it.t.text.trim()) }
+                ?.let { Regex("""\d{1,3}""").find(it.t.text)?.value?.toIntOrNull() }
+            val tyreLife = hs.filter { it.t.top in 0.86f..0.95f && Regex("""^\d{1,3}\s?%$""").matches(it.t.text.trim()) }.maxByOrNull { it.t.top }
+                ?.let { Regex("""\d{1,3}""").find(it.t.text)?.value?.toIntOrNull()?.takeIf { v -> v <= 100 } }
+            val ovt = when {
+                hs.any { Txt.has(it.c, "ATIVADO") || it.c.endsWith("IVADO") } -> OvertakeState.ACTIVE
+                hs.any { Txt.has(it.c, "PRONTO") } -> OvertakeState.READY
+                else -> null
+            }
+            val codeLine = hs.firstOrNull { Regex("""^[A-Z][A-Za-z]{2}$""").matches(it.t.text.trim()) && hs.any { v -> sameRow(v, it) && Txt.has(v.c, "VOLTA") } }
+            val pos = codeLine?.let { c -> hs.firstOrNull { o -> o !== c && sameRow(o, c) && o.t.right <= c.t.left + 0.01f && Regex("""^\d{1,2}$""").matches(o.t.text.trim()) }?.t?.text?.trim()?.toIntOrNull() }
+            val speed = hs.firstOrNull { Regex("""^\d{2,3}$""").matches(it.t.text.trim()) && hs.any { k -> Txt.has(k.c, "KMH") && abs(k.cy - it.cy) < 0.03f && abs(k.cx - it.cx) < 0.2f } }?.t?.text?.trim()?.toIntOrNull()
+            val stops = hs.firstNotNullOfOrNull { Regex("""(\d)\D{0,2}PITSTOP""").find(it.c)?.groupValues?.get(1)?.toIntOrNull() }
+            val pts = hs.firstNotNullOfOrNull { Regex("""\+(\d{1,2})\s?PTS""").find(it.t.text.replace(" ", ""))?.groupValues?.get(1)?.toIntOrNull() }
+            return DriverHud(
+                left = left, code = codeLine?.t?.text?.trim()?.uppercase(), position = pos, ers = ers, tyreLife = tyreLife, overtake = ovt, speedKmh = speed,
+                pitRequested = hs.any { Txt.has(it.c, "CANCELARPITSTOP") }, inPit = hs.any { Txt.has(it.c, "TROCANDOPNEUS") }, stops = stops, finishPoints = pts,
+            )
+        }
+        return RaceHud(
+            lap = lap, totalLaps = total, weatherWord = word, weather = weather, rainChance = rain, tempC = temp, timeLeft = timeLeft,
+            messages = messages, drivers = listOf(side(true), side(false)), rivalPitTyre = rivalTyre,
+            tyreWarning = Txt.has(msgAll + allC, "TOTALMENTEDESGASTADOS") || Txt.has(allC, "PNEUSESTAOQUASE"),
+            lastLap = Txt.has(msgAll, "ULTIMAVOLTA"), finished = ls.count { it.c == "FIM" } >= 1,
+        )
+    }
+
+    private fun readDuel(ls: List<L>, all: String): DuelResult {
+        val winner = ls.firstOrNull { Txt.has(it.c, "VENCEDOR") }
+        val ptsLines = ls.mapNotNull { l -> Regex("""^(\d{1,3})\s?PTS$""", RegexOption.IGNORE_CASE).find(l.t.text.trim())?.let { l to it.groupValues[1].toInt() } }
+        // Tela VENCEDOR: placar grande dos dois lados; a sua equipe fica à esquerda.
+        val mine = ptsLines.filter { it.first.cx < 0.5f }.maxByOrNull { it.first.t.bottom - it.first.t.top }?.second
+        val rival = ptsLines.filter { it.first.cx >= 0.5f && it.first.t.left < 0.8f }.firstOrNull()?.second
+        val won = winner?.let { it.cx < 0.5f }
+        val flags = ls.firstOrNull { winner != null && Regex("""^\d{4,5}$""").matches(it.t.text.trim()) && it.t.top in 0.45f..0.6f }?.t?.text?.trim()?.toIntOrNull()
+        return DuelResult(won, if (winner != null) mine else null, if (winner != null) rival else null, flags, Txt.has(all, "MELHORTEMPO") || Txt.has(all, "FASTESTLAP"))
+    }
 
     private fun readClub(ls: List<L>, all: String, base: GameRead): GameRead {
         val name = ls.firstOrNull { it.t.top < 0.07f && it.t.bottom > 0.03f && it.t.text.any { c -> c.isLetter() } }?.t?.text?.trim()

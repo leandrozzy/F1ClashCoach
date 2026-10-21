@@ -112,9 +112,13 @@ object TrackCatalog {
     /** Encontra a pista mencionada num texto de OCR. */
     fun match(text: String): Track? {
         val up = text.uppercase()
+        val compact = java.text.Normalizer.normalize(up, java.text.Normalizer.Form.NFD).filter { it.isLetterOrDigit() }
         return tracks
             .flatMap { t -> t.aliases.map { a -> t to a } }
-            .filter { (_, alias) -> Regex("\\b" + Regex.escape(alias) + "\\b").containsMatchIn(up) }
+            .filter { (_, alias) ->
+                Regex("\\b" + Regex.escape(alias) + "\\b").containsMatchIn(up) ||
+                    (alias.length >= 6 && compact.contains(alias.filter { it.isLetterOrDigit() }))
+            }
             .maxByOrNull { (_, alias) -> alias.length }
             ?.first
     }

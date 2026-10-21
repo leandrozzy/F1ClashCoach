@@ -185,19 +185,44 @@ class CoachCaptureService : Service() {
         when (p.screen) {
             GameScreen.RACE -> {
                 lastRaceSeenAt = System.currentTimeMillis()
-                if (p.lap == 1 && p.positions.isNotEmpty()) lastGrid = p.positions
-                val snapshot = p.toSnapshot()
                 val tm = data.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
-                val tips = LiveCoach(WearModel(data.tyreObservations)).advise(snapshot, currentTrack, tm)
-                LiveState.update { it.copy(tips = tips, track = currentTrack) }
-                overlay.setHeader("🏁 V${p.lap ?: "?"}/${p.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "pista ?"}")
-                overlay.showTips(tips)
-                if (settings.learnTyreWear) trackTyres(snapshot.drivers.mapIndexed { i, d -> i to d }, p.lap)
+                val hud0 = p.game?.race
+                if (hud0 != null) {
+                    // O OCR não lê a letra do composto: identifica pela cor do ícone do pneu.
+                    val frame = LiveState.lastFrame
+                    val hud = if (frame != null) hud0.copy(drivers = hud0.drivers.mapIndexed { i, d ->
+                        val tyre = smoothTyre(i, sampleTyre(frame, if (i == 0) 0.025f else 0.525f))
+                        d.copy(tyre = tyre ?: d.tyre)
+                    }) else hud0
+                    hud.totalLaps?.let { lastTotalLaps = it }
+                    lastWeather = hud.weather
+                    lastRaceHud = hud
+                    val names = data.garage.drivers.filter { it.equipped }.map { it.name }
+                    val tips = LiveCoach(WearModel(data.tyreObservations)).adviseHud(hud, currentTrack, tm, names)
+                    LiveState.update { it.copy(tips = tips, track = currentTrack) }
+                    val rain = hud.rainChance?.let { " • ☔$it%" } ?: ""
+                    overlay.setHeader("🏁 V${hud.lap ?: "?"}/${hud.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "corrida"}$rain")
+                    overlay.showTips(tips, footer = hud.drivers.joinToString("  ") { d ->
+                        "${d.code ?: "?"}: ${d.tyre?.short ?: "?"} ${d.tyreLife ?: "?"}% ⚡${d.ers ?: "?"}%"
+                    })
+                    if (settings.learnTyreWear) trackTyres(hud.toSnapshot().drivers.mapIndexed { i, d -> i to d }, hud.lap)
+                    hud.drivers.mapNotNull { it.tyre }.forEach { usedTyres += it }
+                } else {
+                    if (p.lap == 1 && p.positions.isNotEmpty()) lastGrid = p.positions
+                    val snapshot = p.toSnapshot()
+                    val tips = LiveCoach(WearModel(data.tyreObservations)).advise(snapshot, currentTrack, tm)
+                    LiveState.update { it.copy(tips = tips, track = currentTrack) }
+                    overlay.setHeader("🏁 V${p.lap ?: "?"}/${p.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "pista ?"}")
+                    overlay.showTips(tips)
+                    if (settings.learnTyreWear) trackTyres(snapshot.drivers.mapIndexed { i, d -> i to d }, p.lap)
+                }
             }
             GameScreen.RACE_RESULT -> onResult(p, settings.autoRecordResults)
             GameScreen.PARTS, GameScreen.DRIVERS, GameScreen.UPGRADE -> if (settings.autoScanGarage) scanGarage(p)
             GameScreen.HOME, GameScreen.RACE_MENU, GameScreen.GP, GameScreen.OBJECTIVES, GameScreen.TEAM_DRIVERS,
-            GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE -> onGameScreen(p)
+            GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE,
+            GameScreen.ASSET_DETAIL, GameScreen.FEATURED, GameScreen.DUEL_SERIES, GameScreen.PRE_RACE_TYRES, GameScreen.PRE_RACE,
+            GameScreen.QUALIFYING -> onGameScreen(p)
             else -> {
                 val mode = p.mode
                 if (mode != null && mode != GameMode.CLUB && mode != GameMode.SEASON && p.title != null &&
@@ -227,6 +252,45 @@ class CoachCaptureService : Service() {
                     .filter { it.icon in setOf("🏆", "⛔", "⭐") }
                 val advice = items.joinToString("\n\n") { "${it.icon} ${it.title}\n${it.detail}" }
                 onEventScreen(GameMode.GRAND_PRIX, listOfNotNull(gp.name, gp.round).joinToString(" — "), gp.timeLeftMs, advice)
+            }
+            GameScreen.PRE_RACE_TYRES -> if (g.tyreLapTimes.isNotEmpty()) {
+                // Tempos reais por composto → plano de pneus para esta corrida.
+                val avg = com.leandro.f1clashcoach.core.model.Tyre.entries.mapNotNull { t ->
+                    g.tyreLapTimes.values.mapNotNull { it[t] }.takeIf { it.isNotEmpty() }?.average()?.let { t to it }
+                }.toMap()
+                currentLapTimes = avg
+                val track = currentTrack ?: com.leandro.f1clashcoach.core.model.TrackCatalog.byId(d.gp?.trackId)
+                val laps = g.totalLaps ?: lastTotalLaps ?: d.series[d.garage.series]?.laps ?: 6
+                if (track != null) {
+                    val tm = d.garage.drivers.filter { it.equipped }.map { it.stats.tyreManagement }.ifEmpty { listOf(50) }.average().toInt()
+                    val pit = d.garage.carTotals?.pitStop?.takeIf { it > 0 } ?: 4.0
+                    val plans = runCatching { RaceStrategist(WearModel(d.tyreObservations)).bestPlans(RaceContext(track, laps, tyreManagement = tm, pitStopTime = pit, lapTimes = avg), top = 2) }.getOrDefault(emptyList())
+                    overlay.showMessage(
+                        "🛞 Largada em ${track.name} ($laps voltas)\n" + plans.joinToString("\n") { pl -> "• ${pl.summary()}" } +
+                            "\nTempos: " + avg.entries.joinToString(" ") { "${it.key.short} ${"%.2f".format(it.value)}s" },
+                        pin = false,
+                    )
+                }
+            }
+            GameScreen.PRE_RACE -> g.rivalTeamScore?.let { rival ->
+                val mine = d.garage.teamScore
+                val diff = mine - rival
+                overlay.showMessage(
+                    "🆚 Rival: pontuação $rival • você $mine (${if (diff >= 0) "+" else ""}$diff)\n" +
+                        when { diff >= 40 -> "Você é favorito: largue com o plano padrão e controle o ritmo."; diff <= -40 -> "Rival mais forte: arrisque na estratégia (pneu diferente/uma parada a menos) e use o Overtake cedo."; else -> "Duelo equilibrado: classificação e pit stop decidem." },
+                    pin = false,
+                )
+            }
+            GameScreen.DUEL_SERIES -> {
+                val prog = com.leandro.f1clashcoach.core.engine.Progression.plan(d.garage, com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series), d.races, d.flags)
+                overlay.showMessage("🏁 Rumo à Série 12 • bandeiras ${d.flags ?: "?"}\n" + prog.steps.joinToString("\n") { st ->
+                    "S${st.series.number}: faltam ${st.flagsMissing ?: "?"} 🏳" + (st.scoreGap?.takeIf { it > 0 }?.let { " • +$it pontuação" } ?: "")
+                } + (prog.advice.firstOrNull()?.let { "\n💡 $it" } ?: ""), pin = false)
+            }
+            GameScreen.ASSET_DETAIL -> g.asset?.let { a ->
+                val tier = a.minTier?.let { " • GP: $it+" } ?: ""
+                overlay.showMessage("🔎 ${a.name} (${a.rarity.label})$tier" + (a.upgradeCost?.let { "\nUpgrade: ${it / 1000}k moedas" } ?: "") +
+                    (a.driverGain?.let { gn -> "\nGanho: ULT +${gn.overtaking} DEF +${gn.defending} QUA +${gn.qualifying} LAR +${gn.raceStart} PNEU +${gn.tyreManagement}" } ?: ""), pin = false)
             }
             GameScreen.PIT_PASS, GameScreen.HOME -> {
                 if (g.seasonName != null && g.seasonLeftMs != null) app.store.upsertEvent(GameMode.SEASON, "Pit Pass ${g.seasonName}", g.seasonLeftMs)
@@ -263,6 +327,34 @@ class CoachCaptureService : Service() {
     }
 
     private var lastAutoAiAt = 0L
+    @Volatile private var lastRaceHud: com.leandro.f1clashcoach.core.engine.RaceHud? = null
+    @Volatile private var currentLapTimes: Map<Tyre, Double> = emptyMap()
+    private val tyreHistory = HashMap<Int, ArrayDeque<Tyre?>>()
+
+    /** Amostra os pixels do ícone do pneu (canto inferior de cada painel de piloto). */
+    private fun sampleTyre(frame: android.graphics.Bitmap, x0: Float): Tyre? = runCatching {
+        val w = frame.width; val h = frame.height
+        val px = ArrayList<Triple<Int, Int, Int>>()
+        var y = (h * 0.925f).toInt()
+        while (y < (h * 0.947f).toInt()) {
+            var x = (w * x0).toInt()
+            while (x < (w * (x0 + 0.05f)).toInt()) {
+                val c = frame.getPixel(x, y)
+                px += Triple((c shr 16) and 0xff, (c shr 8) and 0xff, c and 0xff)
+                x += 2
+            }
+            y += 2
+        }
+        com.leandro.f1clashcoach.core.engine.TyreColors.vote(px)
+    }.getOrNull()
+
+    /** Só aceita a troca de composto se aparecer em 2 leituras seguidas (evita ruído). */
+    private fun smoothTyre(i: Int, t: Tyre?): Tyre? {
+        val q = tyreHistory.getOrPut(i) { ArrayDeque() }
+        q.addLast(t); while (q.size > 3) q.removeFirst()
+        val last2 = q.toList().takeLast(2)
+        return if (last2.size == 2 && last2[0] == last2[1]) last2[0] else q.firstOrNull { it != null }
+    }
 
     /** Tela de evento/GP/exibição/momentos: registra, mostra a dica e pede análise automática à IA uma vez. */
     private fun onEventScreen(mode: GameMode, title: String, timeLeftMs: Long?, localAdvice: String? = null) {
@@ -349,19 +441,24 @@ class CoachCaptureService : Service() {
         val now = System.currentTimeMillis()
         currentTrack?.let { t -> stints.values.forEach { flushStint(t, it) } }
         stints.clear()
-        if (!autoRecord || p.won == null || now - lastResultAt < 90_000 || now - lastRaceSeenAt > 10 * 60_000) return
+        val duel = p.game?.duel
+        val won = duel?.won ?: p.won
+        duel?.flagsAfter?.let { f -> app.store.update { it.copy(flags = f) } }
+        if (!autoRecord || won == null || now - lastResultAt < 90_000 || now - lastRaceSeenAt > 10 * 60_000) return
         lastResultAt = now
         val record = RaceRecord(
             id = UUID.randomUUID().toString(), timestamp = now, trackId = currentTrack?.id ?: "desconhecida",
             series = p.series ?: app.store.data.value.garage.series,
-            gridPositions = lastGrid, finishPositions = p.positions.take(2), won = p.won, weather = lastWeather,
+            gridPositions = lastGrid, finishPositions = p.positions.take(2), won = won, weather = lastWeather,
             strategy = usedTyres.joinToString("→") { it.short }, source = "auto",
+            notes = duel?.let { dd -> "Pontos ${dd.myPoints ?: "?"} x ${dd.rivalPoints ?: "?"}" + if (dd.fastestLap) " • volta mais rápida" else "" } ?: "",
         )
         app.store.addRace(record)
         usedTyres.clear(); lastGrid = emptyList()
-        val txt = if (p.won == true) "🏆 Vitória registrada!" else debrief(record)
+        val stars = app.store.data.value.let { d -> com.leandro.f1clashcoach.core.model.SeriesCatalog.merged(d.series).firstOrNull { it.number == d.garage.series }?.prizeStars }
+        val txt = if (won == true) "🏆 Vitória registrada!" + (stars?.let { " +★$it para o clube" } ?: "") + (duel?.flagsAfter?.let { "\n🏳 Bandeiras: $it" } ?: "") else debrief(record)
         overlay.showMessage(txt, pin = false)
-        LiveState.event("Resultado salvo: ${if (p.won == true) "vitória" else "derrota"} em ${currentTrack?.name ?: "?"}")
+        LiveState.event("Resultado salvo: ${if (won == true) "vitória" else "derrota"} em ${currentTrack?.name ?: "?"}")
     }
 
     /** Diagnóstico rápido pós-derrota, sem internet. */

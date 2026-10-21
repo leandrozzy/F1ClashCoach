@@ -206,6 +206,7 @@ object ScreenReader {
         GameScreen.HOME, GameScreen.RACE_MENU, GameScreen.GP, GameScreen.OBJECTIVES, GameScreen.TEAM_DRIVERS,
         GameScreen.TEAM_CARS, GameScreen.BOOSTERS, GameScreen.CLUB, GameScreen.PIT_PASS, GameScreen.STORE,
         GameScreen.ASSET_DETAIL, GameScreen.FEATURED, GameScreen.DUEL_SERIES, GameScreen.PRE_RACE_TYRES,
+        GameScreen.RACE, GameScreen.RACE_RESULT, GameScreen.QUALIFYING, GameScreen.PRE_RACE,
     )
 
     private val TIMER_RE = Regex("""\b(\d{1,3})\s*(D|DIAS?|DAYS?|H|HRS?|HORAS?|M|MIN|MINS?)\b""")

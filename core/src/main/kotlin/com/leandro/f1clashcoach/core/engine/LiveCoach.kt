@@ -38,6 +38,33 @@ data class Tip(val level: TipLevel, val title: String, val detail: String = "")
  */
 class LiveCoach(private val wear: WearModel = WearModel()) {
 
+    /** Dicas a partir do painel real da corrida (Duelos e Grand Prix). */
+    fun adviseHud(h: RaceHud, track: Track?, tyreManagement: Int = 50, names: List<String> = emptyList()): List<Tip> {
+        val tips = advise(h.toSnapshot(), track, tyreManagement).toMutableList()
+        val remaining = if (h.lap != null && h.totalLaps != null) h.totalLaps - h.lap + 1 else null
+        h.drivers.forEachIndexed { i, d ->
+            val who = d.code ?: names.getOrNull(i) ?: "Piloto ${i + 1}"
+            if (d.overtake == OvertakeState.READY && !d.inPit && (h.lap ?: 0) >= 2) {
+                tips += Tip(
+                    if (remaining != null && remaining <= 2) TipLevel.IMPORTANT else TipLevel.INFO,
+                    "$who: Overtake pronto ⚡", "Ative na entrada da reta quando estiver colado em alguém (ou para defender no fim).",
+                )
+            }
+            if (d.pitRequested && (d.tyreLife ?: 0) >= 55 && h.weather == com.leandro.f1clashcoach.core.model.Weather.DRY && remaining != null && remaining > 1) {
+                tips += Tip(TipLevel.IMPORTANT, "$who: pit pedido com pneu em ${d.tyreLife}%", "Se não era o plano, cancele: ainda tem pneu para mais voltas.")
+            }
+            d.ers?.let { e -> if (remaining != null && remaining <= 1 && e >= 25) tips += Tip(TipLevel.IMPORTANT, "$who: última volta, bateria $e%", "Use o modo de ataque (>>>) e o Overtake até o fim.") }
+        }
+        if (h.tyreWarning) tips += Tip(TipLevel.URGENT, "Rádio: pneus no fim!", "Responda 'Pit Stop' agora; com pneu a 0% você perde muito tempo e não pode usar o Overtake.")
+        h.rivalPitTyre?.let { t ->
+            tips += Tip(TipLevel.IMPORTANT, "Rival parou (foi de ${t.label})",
+                if (remaining != null && remaining <= 2) "Faltam $remaining voltas: fique na pista e ataque." else "Ele perde tempo no box agora: ganhe posição com ritmo; pare você na próxima volta se seu pneu estiver abaixo de 40%.")
+        }
+        h.rainChance?.let { c -> if (c >= 50 && h.weather == com.leandro.f1clashcoach.core.model.Weather.DRY) tips += Tip(TipLevel.IMPORTANT, "Chance de chuva $c%", "Evite parar agora para pneu de seco; se a chuva vier, vá direto para o Intermediário/Wet.") }
+        if (h.lastLap) tips += Tip(TipLevel.INFO, "Última volta", "Nada de poupar: ataque e use toda a bateria.")
+        return tips.distinctBy { it.title }.sortedBy { it.level.ordinal }
+    }
+
     fun advise(s: RaceSnapshot, track: Track?, tyreManagement: Int = 50): List<Tip> {
         val tips = mutableListOf<Tip>()
         val remaining = s.lapsRemaining
