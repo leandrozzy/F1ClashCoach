@@ -161,10 +161,25 @@ class FrameProcessor(
                     // Pit: desgaste medido nesta corrida (não modelo). As dicas antigas de desgaste estimado saem.
                     val total = hud.totalLaps ?: lastTotalLaps
                     hud.drivers.forEachIndexed { i, d -> liveWear.observe(i, hud.lap, d.tyre, d.tyreLife) }
-                    val pitTips = hud.drivers.indices.mapNotNull { i ->
+                    val calls = hud.drivers.indices.map { i ->
                         val d = hud.drivers[i]
                         liveWear.call(i, hud.lap, total, d.tyre, d.tyreLife, lastRanges, currentLapTimes, hud.weather != Weather.DRY)
-                    }.map { c -> com.leandro.f1clashcoach.core.engine.Tip(if (c.urgent) com.leandro.f1clashcoach.core.engine.TipLevel.URGENT else if (c.pitAtEndOfLap != null) com.leandro.f1clashcoach.core.engine.TipLevel.IMPORTANT else com.leandro.f1clashcoach.core.engine.TipLevel.INFO, c.text, "") }
+                    }
+                    // faixa curta, uma decisão por piloto ("COL: box fim V2 → M • BOR: vai até o fim")
+                    if (calls.any { it != null }) {
+                        val parts = calls.mapIndexedNotNull { i, c ->
+                            c ?: return@mapIndexedNotNull null
+                            val who = hud.drivers[i].code ?: "P${i + 1}"
+                            who + ": " + when {
+                                c.urgent -> "BOX no fim desta volta → ${c.nextTyre?.short}"
+                                c.pitAtEndOfLap != null -> "box no fim da V${c.pitAtEndOfLap} → ${c.nextTyre?.short}"
+                                else -> "vai até o fim"
+                            }
+                        }
+                        val key = calls.joinToString("|") { c -> "${c?.pitAtEndOfLap}-${c?.nextTyre}-${c?.urgent}" }
+                        overlay.raceStrip("🏁 " + parts.joinToString("  •  "), key, calls.any { it?.urgent == true })
+                    }
+                    val pitTips = calls.filterNotNull().map { c -> com.leandro.f1clashcoach.core.engine.Tip(if (c.urgent) com.leandro.f1clashcoach.core.engine.TipLevel.URGENT else if (c.pitAtEndOfLap != null) com.leandro.f1clashcoach.core.engine.TipLevel.IMPORTANT else com.leandro.f1clashcoach.core.engine.TipLevel.INFO, c.text, "") }
                     LiveState.update { it.copy(race = it.race.copy(lap = hud.lap, laps = total, pitLines = pitTips.map { t -> t.title }, updatedAt = System.currentTimeMillis())) }
                     val modeled = setOf("CONSERVAR", "pare nesta volta", "pode ATACAR")
                     val tips = (pitTips + LiveCoach(WearModel(data.tyreObservations)).adviseHud(hud, currentTrack, tm, names)
@@ -174,7 +189,7 @@ class FrameProcessor(
                     overlay.setHeader("🏁 V${hud.lap ?: "?"}/${hud.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "corrida"}$rain")
                     overlay.showTips(tips, footer = hud.drivers.joinToString("  ") { d ->
                         "${d.code ?: "?"}: ${d.tyre?.short ?: "?"} ${d.tyreLife ?: "?"}% ⚡${d.ers ?: "?"}%"
-                    })
+                    }, ticker = calls.all { it == null })
                     if (settings.learnTyreWear) trackTyres(hud.toSnapshot().drivers.mapIndexed { i, d -> i to d }, hud.lap)
                     hud.drivers.mapNotNull { it.tyre }.forEach { usedTyres += it }
                 } else {
@@ -500,6 +515,7 @@ class FrameProcessor(
     private fun newRace() {
         lastTotalLaps = null
         liveWear.reset()
+        overlay.resetRace()
         tyreHistory.clear()
     }
     private var storeNotified = ""

@@ -1,7 +1,6 @@
 package com.leandro.f1clashcoach.core.engine
 
 import com.leandro.f1clashcoach.core.model.Tyre
-import kotlin.math.floor
 
 /** Plano de pit de um piloto, calculado com o desgaste medido nesta corrida. */
 data class PitCall(
@@ -26,32 +25,39 @@ data class PitCall(
  * faixas de voltas que o próprio jogo informa na escolha de pneus.
  */
 class LiveWear {
-    private data class Obs(val lap: Int, val life: Int)
-    private data class Stint(val tyre: Tyre, val obs: MutableList<Obs>)
+    /** Vida do pneu no começo de cada volta (primeira leitura da volta) e a última vista. */
+    private class Stint(val tyre: Tyre) {
+        val lapStart = sortedMapOf<Int, Int>()
+        var lastLap = 0
+        var lastLife = 100
+    }
 
     private val stints = HashMap<Int, Stint>()
 
     fun reset() = stints.clear()
 
-    /** Registra o painel de um piloto. Nova parada (pneu trocado ou vida subiu) começa outro stint. */
+    /** Registra o painel de um piloto. Pneu trocado (ou vida que sobe) começa outro stint. */
     fun observe(driver: Int, lap: Int?, tyre: Tyre?, life: Int?) {
         if (lap == null || tyre == null || life == null) return
-        val s = stints[driver]
-        if (s == null || s.tyre != tyre || life > (s.obs.lastOrNull()?.life ?: 0) + 10) {
-            stints[driver] = Stint(tyre, mutableListOf(Obs(lap, life)))
-            return
+        var s = stints[driver]
+        if (s == null || s.tyre != tyre || life > s.lastLife + 10) {
+            s = Stint(tyre); stints[driver] = s
+        } else {
+            // volta lida errada (voltou para trás ou pulou longe): ignora a leitura
+            if (lap < s.lastLap || lap > s.lastLap + 2) return
         }
-        val last = s.obs.last()
-        if (lap > last.lap || life < last.life) s.obs += Obs(lap, life)
+        if (lap !in s.lapStart) s.lapStart[lap] = life
+        s.lastLap = lap; s.lastLife = life
     }
 
-    /** % por volta medido: queda de vida entre a primeira e a última volta vistas do stint. */
+    /** % por volta medido entre começos de volta (nunca no meio de uma volta, que dava 40% falso). */
     fun measuredRate(driver: Int): Double? {
-        val o = stints[driver]?.obs ?: return null
-        val first = o.first(); val last = o.last()
-        val laps = last.lap - first.lap
+        val st = stints[driver]?.lapStart ?: return null
+        if (st.size < 2) return null
+        val first = st.entries.first(); val last = st.entries.last()
+        val laps = last.key - first.key
         if (laps < 1) return null
-        return ((first.life - last.life).toDouble() / laps).takeIf { it > 0 }
+        return ((first.value - last.value).toDouble() / laps).takeIf { it > 0 }
     }
 
     /**
@@ -63,35 +69,37 @@ class LiveWear {
         ranges: Map<Tyre, IntRange>, lapTimes: Map<Tyre, Double>, wet: Boolean = false,
     ): PitCall? {
         if (lap == null || totalLaps == null || tyre == null || life == null) return null
-        val remaining = totalLaps - lap + 1
         val measured = measuredRate(driver)
         val fromGame = ranges[tyre]?.let { r -> 100.0 / ((r.first + r.last) / 2.0).coerceAtLeast(0.5) }
         val rate = measured ?: fromGame ?: return null
-        // o jogo avisa pelo rádio por volta de 10–15%: abaixo disso o carro fica muito lento
-        val usable = (life - 10).coerceAtLeast(0)
-        val lapsLeft = usable / rate
         val name = "P${driver + 1}"
-        val atEndRaw = life - rate * remaining
-        // Parar custa ~20 s: na última volta nunca compensa; e se o pneu só acaba nos metros finais, segue.
-        val reachesEnd = lapsLeft >= remaining || remaining <= 1 || atEndRaw >= -rate * 0.35
-        val pitLapRaw = (lap + floor(lapsLeft).toInt() - 1).coerceAtLeast(lap)
-        if (reachesEnd || pitLapRaw >= totalLaps) {
-            val atEnd = atEndRaw.toInt().coerceAtLeast(0)
-            return PitCall(driver, tyre, life, rate, measured != null, null, null, atEnd,
-                "$name: sem parada — o ${tyre.short} chega ao fim" + (if (atEnd > 0) " com ~$atEnd%" else " no limite") +
-                    if (measured == null) " (pela faixa do jogo)" else "", false)
+        val tag = if (measured == null) " (pela faixa do jogo)" else ""
+        // vida no fim DESTA volta: começo da volta menos o gasto de uma volta
+        val start = stints[driver]?.takeIf { it.tyre == tyre }?.lapStart?.get(lap) ?: life
+        val endOfLap = minOf(life.toDouble(), start - rate)
+        val after = totalLaps - lap
+        val atFinish = endOfLap - rate * after
+        // Parar custa ~20 s: na última volta nunca; se o pneu só acaba nos metros finais, segue.
+        fun noStop(): PitCall {
+            val f = atFinish.toInt().coerceAtLeast(0)
+            return PitCall(driver, tyre, life, rate, measured != null, null, null, f,
+                "$name: sem parada — o ${tyre.short} chega ao fim" + (if (f > 0) " com ~$f%" else " no limite") + tag, false)
         }
-        val pitLap = pitLapRaw
-        val after = totalLaps - pitLap
+        if (after <= 0 || atFinish >= -rate * 0.35) return noStop()
+        // o jogo avisa pelo rádio por volta de 10%: abaixo disso o carro fica muito lento
+        val extra = kotlin.math.floor(((endOfLap - 10) / rate).coerceAtLeast(0.0)).toInt()
+        val pitLap = lap + extra
+        if (pitLap >= totalLaps) return noStop()
+        val left = totalLaps - pitLap
         // pneu seguinte: o mais rápido cuja faixa (do jogo) cobre as voltas que faltam
         val dry = listOf(Tyre.SOFT, Tyre.MEDIUM, Tyre.HARD)
-        val options = (if (wet) listOf(Tyre.INTER, Tyre.WET) else dry).filter { t -> ranges[t]?.let { it.last >= after } ?: false }
+        val options = (if (wet) listOf(Tyre.INTER, Tyre.WET) else dry).filter { t -> ranges[t]?.let { it.last >= left } ?: false }
         val next = options.minByOrNull { lapTimes[it] ?: 99.0 }
             ?: (if (wet) Tyre.INTER else dry.filter { ranges.containsKey(it) }.maxByOrNull { ranges[it]!!.last } ?: Tyre.HARD)
-        val urgent = pitLap <= lap
+        val urgent = pitLap == lap
         return PitCall(driver, tyre, life, rate, measured != null, pitLap, next, null,
-            (if (urgent) "$name: BOX nesta volta" else "$name: pare no fim da volta $pitLap") + " → ${next.short} (faltarão $after voltas)" +
-                " • gasto ${"%.0f".format(rate)}%/volta" + if (measured == null) " pela faixa do jogo" else " medido",
+            (if (urgent) "$name: BOX no fim desta volta" else "$name: pare no fim da volta $pitLap") + " → ${next.short} ($left voltas)" +
+                " • ~${"%.0f".format(rate)}%/volta" + tag,
             urgent)
     }
 }

@@ -2,6 +2,9 @@ package com.leandro.f1clashcoach.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -119,59 +122,121 @@ fun RaceScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
     val setup = remember(data.garage, trackId) { SetupOptimizer.optimize(data.garage, track) }
     val play = remember(data.races, trackId) { TrackPlaybook.forTrack(data.races, trackId) }
 
+    var allStock by remember { mutableStateOf(false) }
+    val best = plans.firstOrNull()
+
     LazyColumn(modifier) {
-        // ---------- Agora (lido do jogo) ----------
+        // ---------- Plano da próxima corrida: tudo num cartão só, visual ----------
         item {
             HeroCard {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Próxima corrida", fontSize = 12.sp, color = Muted)
-                            Text(race.trackName ?: "Abra a corrida no jogo", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+                            Text(if (race.trackName != null) "Corrida lida do jogo" else "Planejar corrida", fontSize = 12.sp, color = Muted)
+                            Text(race.trackName ?: track.name, fontSize = 22.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, color = Color.White)
                         }
-                        race.laps?.let { BigNumber(if (race.lap != null) "${race.lap}/$it" else "$it", "voltas", Color.White) }
+                        BigNumber(if (race.lap != null && race.laps != null) "${race.lap}/${race.laps}" else "$laps", "voltas", Color.White)
                     }
                     race.odds?.let { Pill("🆚 $it", Sky) }
-                    if (race.ranges.isNotEmpty()) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            race.ranges.entries.sortedBy { it.key.ordinal }.forEach { (t, r) ->
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    TyreBadge(t, 40.dp)
-                                    Text("${r.first}-${r.last} v", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    race.lapTimes[t]?.let { Text("%.2fs".format(it), fontSize = 10.sp, color = Muted) }
+                    // faixas de cada pneu (as do jogo; sem leitura, as padrão)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        ranges.entries.sortedBy { it.key.ordinal }.forEach { (t, r) ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                TyreBadge(t, 34.dp)
+                                Text("${r.first}-${r.last} v", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                    if (race.ranges.isEmpty()) Text("Faixas padrão. Na tela de pneus do jogo eu leio as reais e o plano se ajusta.", fontSize = 11.sp, color = Muted)
+                    // estratégia: barra com um trecho por pneu, do tamanho das voltas
+                    best?.let { p ->
+                        Text("Estratégia", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted)
+                        Row(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(10.dp))) {
+                            p.stints.forEachIndexed { i, (t, n) ->
+                                Box(Modifier.weight(n.toFloat()).fillMaxHeight().background(tyreColor(t)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                                    Text("${t.short} • ${n}v", fontSize = 13.sp, fontWeight = FontWeight.Black, color = if (t == Tyre.HARD || t == Tyre.MEDIUM) Ink else Color.White)
+                                }
+                                if (i < p.stints.size - 1) Box(Modifier.width(3.dp).fillMaxHeight().background(Navy))
+                            }
+                        }
+                        val pitAt = p.stints.dropLast(1).runningFold(0) { acc, st -> acc + st.second }.drop(1)
+                        Text(if (p.stops == 0) "Sem parada." else "Pit no fim da volta ${pitAt.joinToString(" e ")}.", fontSize = 13.sp, color = Color.White)
+                    }
+                    // reforços por piloto e trecho
+                    if (boostPlan.slots.isNotEmpty()) {
+                        Text("Reforços", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Muted)
+                        boostPlan.slots.groupBy { it.stint }.toSortedMap().forEach { (stint, sl) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(if (stint == 0) "Largada" else "Após ${stint}º pit", fontSize = 11.sp, color = Muted, modifier = Modifier.width(70.dp))
+                                sl.sortedBy { it.driver }.forEach { b ->
+                                    val main = Boosters.find(b.booster)?.effects?.maxByOrNull { it.value }?.key
+                                    Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(PanelHi).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        BottleIcon(main?.let { boostColor(it) } ?: Muted, 22.dp)
+                                        Spacer(Modifier.width(4.dp))
+                                        Column {
+                                            Text("P${b.driver + 1}", fontSize = 9.sp, color = Muted)
+                                            Text(b.booster, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                                        }
+                                    }
                                 }
                             }
                         }
-                    } else Text("Na tela de escolha de pneus eu leio as voltas, a faixa de cada pneu e o tempo por volta — e monto o plano com os seus reforços.",
-                        fontSize = 12.sp, color = Muted)
-                    race.plans.firstOrNull()?.let { ActionRow("✅", "Plano: $it", "Pelas faixas e tempos do jogo", Good) }
+                    } else if (owned.isEmpty()) Text("🧪 Abra Equipe › Reforços no jogo uma vez para eu planejar os reforços.", fontSize = 12.sp, color = Warn)
+                    // ao vivo (durante a corrida)
                     race.pitLines.forEach { ActionRow("🛞", it, "", if (it.contains("BOX")) F1Red else Warn) }
-                    race.boosterLines.take(3).forEach { Text("🧪 $it", fontSize = 12.sp, color = Color.White) }
                 }
             }
         }
 
-        // ---------- Reforços ----------
+        // ---------- Pista e voltas para planejar outra corrida ----------
         item {
-            SectionCard("🧪 Seus reforços (${owned.sumOf { it.count }})") {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TrackCatalog.tracks.forEach { t -> FilterPill(t.name, t.id == trackId, Sky) { trackId = t.id } }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Voltas", fontSize = 13.sp, color = InkMuted)
+                    FilterPill("−", false) { if (laps > 2) laps-- }
+                    Text("$laps", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Ink)
+                    FilterPill("+", false) { if (laps < 20) laps++ }
+                    Spacer(Modifier.weight(1f))
+                    play?.let { tp -> Text("${tp.wins}/${tp.races} vitórias aqui", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink) }
+                }
+                if (plans.size > 1) plans.drop(1).forEach { p ->
+                    Text("Alternativa: ${p.summary()} (+%.1fs)".format(p.totalTime - plans[0].totalTime), fontSize = 12.sp, color = InkMuted)
+                }
+            }
+        }
+
+        // ---------- Setup: só o que trocar ----------
+        item {
+            SectionCard("🔧 Setup para ${track.name}") {
+                when {
+                    data.garage.parts.isEmpty() -> Text("Abra Equipe › Carros no jogo para eu montar o setup.", color = Warn, fontSize = 13.sp)
+                    setup.changes.isEmpty() -> Text("✅ Seu carro equipado já é o melhor para esta pista.", fontSize = 13.sp, color = Good)
+                    else -> setup.changes.forEach { Text("↔ $it", fontSize = 13.sp, color = Color.White) }
+                }
+            }
+        }
+
+        // ---------- Estoque de reforços (recolhido) ----------
+        item {
+            SectionCard("🧪 Estoque de reforços (${owned.sumOf { it.count }})", action = {
+                if (owned.size > 6) Text(if (allStock) "menos" else "ver todos", fontSize = 12.sp, color = Yellow, modifier = Modifier.clickable { allStock = !allStock }.padding(4.dp))
+            }) {
                 if (owned.isEmpty()) Text("Abra Equipe › Reforços no jogo uma vez: eu leio quantos você tem de cada.", fontSize = 12.sp, color = Warn)
-                owned.chunked(3).forEach { row ->
+                (if (allStock) owned else owned.take(6)).chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { b ->
                             val main = b.def?.effects?.maxByOrNull { it.value }?.key
-                            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(PanelHi).padding(8.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    BottleIcon(main?.let { boostColor(it) } ?: Muted, 30.dp)
-                                    Spacer(Modifier.weight(1f))
-                                    Text("${b.count}", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
+                            Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(PanelHi).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                BottleIcon(main?.let { boostColor(it) } ?: Muted, 22.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(b.name, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
+                                    Text(b.def?.effects?.entries?.sortedByDescending { it.value }?.joinToString(" ") { (st, v) -> "${st.short}+$v" } ?: "", fontSize = 9.sp, color = Muted, maxLines = 1)
                                 }
-                                Text(b.name, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
-                                b.def?.effects?.entries?.sortedByDescending { it.value }?.forEach { (s, v) ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(Modifier.size(7.dp).clip(CircleShape).background(boostColor(s)))
-                                        Text(" ${s.short} +$v", fontSize = 10.sp, color = Muted)
-                                    }
-                                } ?: Text("bônus não catalogado", fontSize = 10.sp, color = Muted)
+                                Text("${b.count}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = Color.White)
                             }
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -180,68 +245,15 @@ fun RaceScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
                 Text("Regra do jogo: 1 reforço por piloto na largada e mais 1 a cada pit. \"Largada\" só vale na 1ª volta.", fontSize = 11.sp, color = Muted)
             }
         }
-
-        // ---------- Planejar uma corrida ----------
-        item {
-            SectionCard("📋 Planejar corrida") {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TrackCatalog.tracks.forEach { t -> FilterPill(t.name, t.id == trackId, Sky) { trackId = t.id } }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Voltas", fontSize = 13.sp, color = Muted)
-                    FilterPill("−", false) { if (laps > 2) laps-- }
-                    Text("$laps", fontSize = 20.sp, fontWeight = FontWeight.Black, color = Color.White)
-                    FilterPill("+", false) { if (laps < 20) laps++ }
-                }
-                if (race.ranges.isEmpty()) Text("Usando as faixas padrão (Soft 1-2, Medium 2-3, Hard 3-5). A tela de pneus do jogo atualiza com as reais.", fontSize = 11.sp, color = Warn)
-                plans.forEachIndexed { i, p ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(if (i == 0) Good.copy(alpha = 0.12f) else PanelHi).padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (i == 0) "🥇" else if (i == 1) "🥈" else "🥉", fontSize = 18.sp)
-                        Spacer(Modifier.width(8.dp))
-                        p.stints.forEachIndexed { si, (t, n) ->
-                            if (si > 0) Text(" › ", color = Muted)
-                            TyreBadge(t, 26.dp); Text(" ${n}v", fontSize = 12.sp, color = Color.White)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        if (i > 0) Text("+%.1fs".format(p.totalTime - plans[0].totalTime), fontSize = 11.sp, color = Muted)
-                    }
-                }
-                if (boostPlan.lines.isNotEmpty()) {
-                    SectionTitle("Reforços para esse plano")
-                    boostPlan.lines.forEach { Text("🧪 $it", fontSize = 12.sp, color = Color.White) }
-                }
-                play?.let { tp ->
-                    Text("📈 Seu histórico em ${tp.trackName}: ${tp.wins}/${tp.races} vitórias" + (tp.bestStrategy?.let { " • melhor: $it" } ?: ""), fontSize = 12.sp, color = Good)
-                }
-            }
-        }
-
-        // ---------- Setup ----------
-        item {
-            SectionCard("🔧 Setup para ${track.name}") {
-                if (data.garage.parts.isEmpty()) Text("Abra Equipe › Carros no jogo para eu montar o setup.", color = Warn, fontSize = 13.sp)
-                setup.choices.forEach { c ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                        Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(PanelHi), contentAlignment = Alignment.Center) { PartIcon(c.slot, Color.White, 18.dp) }
-                        Spacer(Modifier.width(8.dp))
-                        Text(c.slot.label, fontSize = 12.sp, color = Muted, modifier = Modifier.width(90.dp))
-                        Text(c.best?.name ?: "—", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                    }
-                }
-                if (setup.changes.isNotEmpty()) setup.changes.forEach { Text("↔ $it", fontSize = 12.sp, color = Good) }
-                else if (data.garage.parts.isNotEmpty()) Text("Seu setup equipado já é o melhor para esta pista ✅", fontSize = 12.sp, color = Good)
-            }
-        }
         item {
             Button(
                 onClick = {
-                    vm.ask(CoachPrompts.racePlan(track, laps, "Plano pelas faixas: ${plans.firstOrNull()?.summary() ?: "-"}. Reforços: ${boostPlan.lines.joinToString(" | ")}"), webSearch = true, focusTrack = track)
+                    vm.ask(CoachPrompts.racePlan(track, laps, "Plano pelas faixas: ${best?.summary() ?: "-"}. Reforços: ${boostPlan.lines.joinToString(" | ")}"), webSearch = true, focusTrack = track)
                     goAi()
                 },
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = F1Red),
-            ) { Text("🤖 Revisar com a IA") }
+                colors = ButtonDefaults.buttonColors(containerColor = Navy),
+            ) { Text("🤖 Revisar com a IA", color = Color.White) }
         }
         item { Spacer(Modifier.height(70.dp)) }
     }

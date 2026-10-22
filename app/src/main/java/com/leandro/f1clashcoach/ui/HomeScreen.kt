@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.leandro.f1clashcoach.ai.AiClient
@@ -78,7 +79,7 @@ private fun AdviceView(c: AdviceCard, onClick: () -> Unit) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(c.title, fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color.White)
             if (c.missing != null) Text("👉 ${c.missing}", fontSize = 12.sp, color = Yellow)
-            c.lines.forEach { Text(it, fontSize = 12.sp, color = Color(0xFFD5DAEA), lineHeight = 16.sp) }
+            c.lines.take(3).forEach { Text(it, fontSize = 12.sp, color = Color(0xFFD5DAEA), lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         Text("›", fontSize = 22.sp, color = Muted)
     }
@@ -110,7 +111,7 @@ fun HomeScreen(
     val cards = remember(data, now) {
         Advisor.cards(data.garage, data.races, data.events, data.objectives, data.gp, data.club, series, data.flags, data.tyreObservations, data.lastMetaTime, now)
     }
-    var showBriefing by remember { mutableStateOf(false) }
+    var moreCards by remember { mutableStateOf(false) }
     var diagOpen by remember { mutableStateOf(false) }
     val hasAi = remember(tick / 4) { AiClient.hasAnyKey(ctx) }
     val readingOn = remember(tick) { CoachAccessibilityService.isEnabled(ctx) || live.running }
@@ -172,7 +173,12 @@ fun HomeScreen(
 
         // ---------- Conselhos automáticos ----------
         item { PageTitle("O que fazer agora", trailing = "automático") }
-        items(cards, key = { it.id }) { c -> AdviceView(c) { go(c.target) } }
+        // só os 4 mais importantes; o resto fica em "ver mais" (antes era uma parede de texto)
+        items(if (moreCards) cards else cards.take(4), key = { it.id }) { c -> AdviceView(c) { go(c.target) } }
+        if (cards.size > 4) item {
+            Text(if (moreCards) "ver menos" else "ver mais ${cards.size - 4} ›", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Ink,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).clickable { moreCards = !moreCards })
+        }
 
         // ---------- Minha equipe ----------
         item {
@@ -205,20 +211,22 @@ fun HomeScreen(
             }
         }
 
-        // ---------- Análise da IA (automática) ----------
+        // ---------- Análise da IA (automática): só um atalho de uma linha ----------
         if (hasAi) item {
-            SectionCard("🤖 Análise do dia (IA)", action = {
-                if (briefingBusy) CircularProgressIndicator(Modifier.padding(2.dp), strokeWidth = 2.dp)
-                else TextButton(onClick = { vm.autoBriefing(force = true) }) { Text("Atualizar", color = Yellow) }
-            }) {
-                val t = data.aiBriefing
-                when {
-                    t.isBlank() -> Text(if (briefingBusy) "Analisando sua conta…" else briefingError?.let { "⚠️ $it" } ?: "Toque em Atualizar.", fontSize = 13.sp, color = Muted)
-                    else -> {
-                        SelectionContainer { Text(if (showBriefing) t else t.take(320) + if (t.length > 320) "…" else "", fontSize = 13.sp, lineHeight = 19.sp) }
-                        if (t.length > 320) TextButton(onClick = { showBriefing = !showBriefing }) { Text(if (showBriefing) "Ver menos" else "Ler tudo", color = Yellow) }
-                    }
+            val first = remember(data.aiBriefing) { mdPlain(data.aiBriefing).lines().firstOrNull { it.length > 12 && !it.contains("BRIEFING", true) } }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(Navy)
+                .clickable { goAi() }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🤖", fontSize = 22.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Análise do dia (IA)", fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color.White)
+                    Text(when {
+                        briefingBusy -> "analisando sua conta…"
+                        first != null -> first
+                        else -> briefingError ?: "toque para abrir"
+                    }, fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
+                Text("›", fontSize = 22.sp, color = Muted)
             }
         }
 

@@ -190,7 +190,7 @@ class OverlayController(
     fun setHeader(text: String) { root?.post { header.text = text } }
 
     /** Dicas da corrida: o painel não abre; o alerta mais importante passa na faixa do topo. */
-    fun showTips(tips: List<Tip>, footer: String? = null) {
+    fun showTips(tips: List<Tip>, footer: String? = null, ticker: Boolean = true) {
         val top = tips.firstOrNull { it.level == TipLevel.URGENT } ?: tips.firstOrNull { it.level == TipLevel.IMPORTANT }
         raceAt = System.currentTimeMillis()
         main.post {
@@ -208,7 +208,7 @@ class OverlayController(
                 }
                 footer?.let { append('\n').append(it) }
             }.trim()
-            if (top != null && top.title != lastTicker) {
+            if (ticker && top != null && top.title != lastTicker) {
                 lastTicker = top.title
                 ticker?.let { tk ->
                     tk.text = (if (top.level == TipLevel.URGENT) "🔴 " else "🟡 ") + top.title
@@ -219,6 +219,29 @@ class OverlayController(
             } else if (top == null) lastTicker = ""
         }
     }
+
+    private var raceKey = ""
+    private val shownAt = HashMap<String, Long>()
+
+    /**
+     * Faixa da corrida (não recebe toques): uma linha por piloto. Só aparece de novo quando a decisão muda
+     * ([key]), não a cada leitura, para não piscar o tempo todo.
+     */
+    fun raceStrip(text: String, key: String, urgent: Boolean) {
+        raceAt = System.currentTimeMillis()
+        main.post {
+            if (root == null || key == raceKey) return@post
+            raceKey = key
+            ticker?.let { tk ->
+                tk.text = text
+                tk.background = round(if (urgent) Color.argb(235, 200, 20, 20) else Color.argb(220, 11, 18, 32), 14, Color.argb(255, 225, 6, 0))
+                tk.visibility = View.VISIBLE
+                main.removeCallbacks(hideTicker); main.postDelayed(hideTicker, if (urgent) 12000 else 7000)
+            }
+        }
+    }
+
+    fun resetRace() { raceKey = "" }
 
     /**
      * Mensagem nova. [pin] = fica aberta até você recolher (ex.: resposta da IA que você pediu).
@@ -235,7 +258,13 @@ class OverlayController(
                 // topo (não recebe toques) e o texto completo fica na bolinha para quem quiser abrir.
                 if (!pinned) body.text = text
                 bubble.text = if (expanded) "✕" else "💬"
+                // o mesmo aviso não volta a passar na faixa antes de 30 min (ex.: "caixote grátis" em toda tela)
+                val now = System.currentTimeMillis()
+                val head = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return@post
+                if (now - (shownAt[head] ?: 0L) < 30 * 60_000L) return@post
+                shownAt[head] = now
                 ticker?.let { tk ->
+                    tk.background = round(Color.argb(220, 11, 18, 32), 14, Color.argb(255, 225, 6, 0))
                     tk.text = text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.take(2).joinToString("\n").take(140)
                     tk.visibility = View.VISIBLE
                     main.removeCallbacks(hideTicker); main.postDelayed(hideTicker, 7000)

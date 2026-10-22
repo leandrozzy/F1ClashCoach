@@ -72,9 +72,12 @@ fun EvolveScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
                     val now = a in plan.doNow
                     val part = data.garage.parts.firstOrNull { it.id == a.itemId }
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(rarityColor(part?.rarity ?: data.garage.drivers.firstOrNull { it.id == a.itemId }?.rarity ?: Rarity.UNKNOWN)), contentAlignment = Alignment.Center) {
-                            if (part != null) PartIcon(part.slot, Color.White, 24.dp) else HelmetIcon(Color.White, 24.dp)
-                        }
+                        val drv = data.garage.drivers.firstOrNull { it.id == a.itemId }
+                        ArtThumb(
+                            if (part != null) com.leandro.f1clashcoach.art.ArtStore.partKey(part.name)
+                            else com.leandro.f1clashcoach.art.ArtStore.driverKey(drv?.name ?: a.name, drv?.rarity ?: Rarity.UNKNOWN, drv?.edition ?: ""),
+                            part?.rarity ?: drv?.rarity ?: Rarity.UNKNOWN, part?.slot, 44.dp,
+                        )
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -91,24 +94,20 @@ fun EvolveScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
             }
         }
 
-        // ---------- Melhores cartas do jogo (rumo à S12) ----------
+        // ---------- Cartas para buscar (rumo à S12): lista curta, não grade cinza ----------
         item {
             val allDrivers = remember(data.garage) { Catalog.driverCollection(data.garage) }
             val allParts = remember(data.garage) { Catalog.partCollection(data.garage) }
-            SectionCard("🎯 Melhores cartas para a Série 12") {
-                Text("As mais fortes que você consegue obter até a Série 12 (lendárias e especiais só se já tiver). Coloridas = você tem; cinza = buscar em caixotes, loja e eventos.", fontSize = 12.sp, color = Muted)
-                SectionTitle("Pilotos")
-                allDrivers.filter { reachable(it) }.sortedByDescending { it.maxTotal }.distinctBy { it.name }.take(6).chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                }
-                SectionTitle("Peças (a melhor de cada tipo)")
-                PartSlot.entries.mapNotNull { sl -> allParts.filter { it.slot == sl && reachable(it) }.maxByOrNull { it.maxTotal } }.chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            val wantDrivers = allDrivers.filter { reachable(it) }.sortedByDescending { it.maxTotal }.distinctBy { it.name }.take(5)
+            val wantParts = PartSlot.entries.mapNotNull { sl -> allParts.filter { it.slot == sl && reachable(it) }.maxByOrNull { it.maxTotal } }
+            SectionCard("🎯 Melhores cartas até a Série 12") {
+                Text("✓ = você já tem. As outras: caixotes, loja e eventos.", fontSize = 12.sp, color = Muted)
+                (wantDrivers + wantParts).forEach { c ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(rarityColor(c.rarity)))
+                        Spacer(Modifier.width(8.dp))
+                        Text((c.slot?.label?.let { "$it: " } ?: "Piloto: ") + c.name, fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f), maxLines = 1)
+                        Text(if (c.owned) "✓ nv ${c.level ?: "?"}" else "Série ${c.series}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (c.owned) Good else Yellow)
                     }
                 }
             }

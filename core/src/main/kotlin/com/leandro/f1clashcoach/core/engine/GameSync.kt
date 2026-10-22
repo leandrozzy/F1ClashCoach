@@ -40,7 +40,16 @@ object GameSync {
         // Loadout limitado de GP mostra outra configuração: só aproveita cartas/níveis, não o equipado.
         val r0 = read
         @Suppress("NAME_SHADOWING")
-        val read = if (r0.restricted) r0.copy(teamScore = null, carTotals = null, equippedParts = emptyList(), driverPair = emptyList()) else r0
+        // O jogo tem 5 configurações de equipe (1 a 5) e a tela mostra a que você tocar: a principal é a de
+        // maior pontuação (a usada nos Duelos). Ver outra (ex.: 940 do GP, 267 de teste) não muda a conta.
+        val otherConfig = r0.teamScore != null && garage.teamScore > 0 && r0.teamScore < garage.teamScore
+        // número absurdo (OCR juntou dígitos; a Série 12 pede ~1450): ignora só a pontuação
+        val crazy = r0.teamScore != null && r0.teamScore > 4000
+        val read = when {
+            r0.restricted || otherConfig -> r0.copy(teamScore = null, carTotals = null, equippedParts = emptyList(), driverPair = emptyList())
+            crazy -> r0.copy(teamScore = null)
+            else -> r0
+        }
         read.coins?.let { if (it != g.coins) g = g.copy(coins = it) }
         read.bucks?.let { if (it != g.bucks) g = g.copy(bucks = it) }
         read.series?.let { if (it != g.series) { g = g.copy(series = it); changes += "Série $it" } }

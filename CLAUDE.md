@@ -115,7 +115,12 @@ painel cobrindo o meio do jogo (agora avisos automáticos só na faixa do topo; 
 reforços com pedaços de nome ("negativa", "ghoul"; `Boosters.normalize`), passe da temporada repetido com
 número errado (um só evento SEASON), GP duplicado na Início, "FLA FL", membros com 0★ não lidos (app relê a
 coluna de reputação ampliada), fotos ruins ("Pilot", preto: `ArtStore.looksLikePhoto`), Especiais x/8.
-Não validado no aparelho: essas correções do `:app` (só CI) e a leitura do 0★ com ML Kit.
+Vídeos do app 1.0.37 (Austin 6 voltas): corrigido pontuação trocada por outra configuração de equipe (o jogo tem
+5; a principal = maior pontuação, `GameSync`), pit pelo pneu no MEIO da volta ("BOX" na volta 1; `LiveWear` usa a
+vida no começo de cada volta), faixa da corrida piscando (só muda quando a decisão muda), avisos repetidos (30 min),
+texto da IA cru ("###", "**": `ui/Markdown.kt`), Início com parede de texto (4 cartões + "ver mais", objetivos num
+cartão só), Corrida/Clube/Evoluir compactos.
+Não validado no aparelho: o visual novo do `:app` (só CI) e a leitura do 0★ com ML Kit.
 
 ## Convenções
 - Lógica e leitura no `:core` (puro, testável); `:app` só captura, persistência, UI e Android.

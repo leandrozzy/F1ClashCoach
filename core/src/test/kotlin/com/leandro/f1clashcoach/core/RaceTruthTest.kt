@@ -51,6 +51,28 @@ class RaceTruthTest {
         assertNull(c.pitAtEndOfLap)
     }
 
+    @Test fun midLapLifeDoesNotTriggerEarlyBox() {
+        // Austin 6 voltas (vídeo do app 1.0.37): Medium 2-3, volta 1 com 79% no meio da volta.
+        // Antes: "BOX nesta volta" já na volta 1. Certo: parar no fim da volta 2.
+        val austin = mapOf(Tyre.SOFT to 1..2, Tyre.MEDIUM to 2..3, Tyre.HARD to 3..3)
+        val w = LiveWear()
+        listOf(98, 94, 88, 84, 79).forEach { w.observe(0, 1, Tyre.MEDIUM, it) }
+        val c = w.call(0, 1, 6, Tyre.MEDIUM, 79, austin, times)!!
+        assertEquals(2, c.pitAtEndOfLap)
+        assertTrue(!c.urgent)
+        // já na volta 2 com 60%: agora sim, box no fim desta volta
+        w.observe(0, 2, Tyre.MEDIUM, 60)
+        val c2 = w.call(0, 2, 6, Tyre.MEDIUM, 55, austin, times)!!
+        assertEquals(2, c2.pitAtEndOfLap)
+        assertTrue(c2.urgent)
+    }
+
+    @Test fun ignoresBadLapReads() {
+        val w = LiveWear()
+        w.observe(0, 1, Tyre.MEDIUM, 98); w.observe(0, 4, Tyre.MEDIUM, 90); w.observe(0, 2, Tyre.MEDIUM, 62)
+        assertEquals(36.0, w.measuredRate(0)!!, 0.01)
+    }
+
     @Test fun usesGameRangeBeforeFirstLap() {
         val c = LiveWear().call(0, 1, 8, Tyre.SOFT, 100, ranges, times)!!
         assertTrue(!c.measured)

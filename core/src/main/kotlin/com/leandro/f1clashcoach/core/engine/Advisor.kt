@@ -101,9 +101,19 @@ object Advisor {
                 ), 3, AdviceTarget.EVOLVE)
         }
 
-        // 7) Eventos e objetivos com prazo (do resumo diário).
+        // 7) Objetivos do jogo: um cartão só (antes eram 3–5 cartões "Diário: …" com o texto inteiro).
+        val pend = objectives.filter { !it.done && (it.endsAt == null || it.endsAt > now) }
+            .sortedWith(compareBy({ it.weekly }, { it.endsAt ?: Long.MAX_VALUE }))
+        if (pend.isNotEmpty()) {
+            val soon = pend.any { !it.weekly && it.endsAt != null && it.endsAt - now < 4 * H }
+            out += AdviceCard("obj", "📋", "Objetivos: ${pend.size} pendentes",
+                pend.take(3).map { o -> "${if (o.weekly) "Semana" else "Hoje"} • ${shortObjective(o.text)} ${o.progress}/${o.target}" },
+                if (soon) 1 else 3, AdviceTarget.GAME)
+        }
+
+        // 8) Eventos com prazo (do resumo diário).
         DailyBriefing.build(garage, races, events, tyreObs, lastMetaTime, now, objectives, gp)
-            .filter { it.icon in setOf("⏱", "📋", "🎯", "🎁", "⭐") || it.priority == 0 }
+            .filter { it.icon !in setOf("✅", "🗓️") && (it.icon in setOf("⏱", "📋", "🎯", "🎁", "⭐") || it.priority == 0) }
             // o GP já tem cartão próprio acima
             .filterNot { out.any { c -> c.id == "gp" } && (it.icon == "🏆" || it.title.startsWith("Grand Prix")) }
             .take(3).forEachIndexed { i, b ->
@@ -119,6 +129,22 @@ object Advisor {
             }
 
         return out.sortedWith(compareBy<AdviceCard> { it.missing != null }.thenBy { it.priority })
+    }
+
+    /** "Derrote os Rivais em Duelos SÉRIE 8 ou eventos do Grand Prix™" → "Derrote rivais (Duelos/GP)". */
+    fun shortObjective(t: String): String {
+        val c = Txt.compact(t)
+        return when {
+            Txt.has(c, "CLAIMREWARD") -> "Resgatar recompensa"
+            Txt.has(c, "CLASSIFIQUE") -> "Terminar à frente do rival (Duelos/GP)"
+            Txt.has(c, "DERROTE") -> "Vencer rivais (Duelos/GP)"
+            Txt.has(c, "CONCLUA") && Txt.has(c, "EPICO") -> "Correr com piloto Épico+"
+            Txt.has(c, "ABRA") && Txt.has(c, "CAIXOTE") -> "Abrir caixotes"
+            Txt.has(c, "REFORCO") -> "Usar reforços"
+            Txt.has(c, "ATUALIZE") || Txt.has(c, "EVOLUA") -> "Evoluir um piloto/peça"
+            Txt.has(c, "ENTRENOJOGO") -> "Entrar no jogo"
+            else -> t.replace(Regex("""\s+"""), " ").take(38)
+        }
     }
 
     fun money(v: Long): String = when {

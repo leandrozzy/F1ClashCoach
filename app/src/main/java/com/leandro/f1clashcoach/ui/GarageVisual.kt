@@ -286,3 +286,16 @@ fun Legend(items: List<Pair<String, Color>>) {
         }
     }
 }
+
+/** Foto pequena da carta (a recortada da sua tela do jogo); sem foto, o ícone na cor da raridade. */
+@Composable
+fun ArtThumb(key: String, rarity: Rarity, slot: PartSlot?, size: Dp = 40.dp) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val art = androidx.compose.runtime.remember(key, com.leandro.f1clashcoach.art.ArtStore.version) { com.leandro.f1clashcoach.art.ArtStore.load(ctx, key) }
+    val c = rarityColor(rarity)
+    Box(Modifier.size(size).clip(RoundedCornerShape(10.dp)).background(c), contentAlignment = Alignment.Center) {
+        if (art != null) androidx.compose.foundation.Image(art.asImageBitmap(), null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        else if (slot == null) HelmetIcon(Color.White, size * 0.6f, c.compositeDark())
+        else PartIcon(slot, Color.White, size * 0.6f, c.compositeDark())
+    }
+}
