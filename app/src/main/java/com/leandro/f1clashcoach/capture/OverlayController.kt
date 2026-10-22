@@ -190,7 +190,7 @@ class OverlayController(
     fun setHeader(text: String) { root?.post { header.text = text } }
 
     /** Dicas da corrida: o painel não abre; o alerta mais importante passa na faixa do topo. */
-    fun showTips(tips: List<Tip>, footer: String? = null, ticker: Boolean = true) {
+    fun showTips(tips: List<Tip>, footer: String? = null, showTicker: Boolean = true) {
         val top = tips.firstOrNull { it.level == TipLevel.URGENT } ?: tips.firstOrNull { it.level == TipLevel.IMPORTANT }
         raceAt = System.currentTimeMillis()
         main.post {
@@ -208,7 +208,7 @@ class OverlayController(
                 }
                 footer?.let { append('\n').append(it) }
             }.trim()
-            if (ticker && top != null && top.title != lastTicker) {
+            if (showTicker && top != null && top.title != lastTicker) {
                 lastTicker = top.title
                 ticker?.let { tk ->
                     tk.text = (if (top.level == TipLevel.URGENT) "🔴 " else "🟡 ") + top.title

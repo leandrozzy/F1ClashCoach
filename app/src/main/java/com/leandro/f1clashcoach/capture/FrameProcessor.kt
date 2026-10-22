@@ -189,7 +189,7 @@ class FrameProcessor(
                     overlay.setHeader("🏁 V${hud.lap ?: "?"}/${hud.totalLaps ?: lastTotalLaps ?: "?"} • ${currentTrack?.name ?: "corrida"}$rain")
                     overlay.showTips(tips, footer = hud.drivers.joinToString("  ") { d ->
                         "${d.code ?: "?"}: ${d.tyre?.short ?: "?"} ${d.tyreLife ?: "?"}% ⚡${d.ers ?: "?"}%"
-                    }, ticker = calls.all { it == null })
+                    }, showTicker = calls.all { it == null })
                     if (settings.learnTyreWear) trackTyres(hud.toSnapshot().drivers.mapIndexed { i, d -> i to d }, hud.lap)
                     hud.drivers.mapNotNull { it.tyre }.forEach { usedTyres += it }
                 } else {
