@@ -200,13 +200,14 @@ class CoachStore(context: Context) {
         val newName = if (cur != null && single && !trustName) cur.name else name.trim()
         val key = eventKey(mode, newName)
         val readEnd = timeLeftMs?.let { now + it }
+        val curEnd = cur?.endsAt
         val ev = (cur ?: ActiveEvent(key, mode, newName, firstSeen = now)).copy(
             id = key, name = newName,
             lastSeen = now,
             // o timer do passe só cresce de leitura para leitura se o OCR pegou o de outro quadro: fica o maior
             endsAt = when {
-                readEnd == null -> cur?.endsAt
-                single && cur?.endsAt != null && !trustName -> maxOf(cur.endsAt, readEnd)
+                readEnd == null -> curEnd
+                single && curEnd != null && !trustName -> maxOf(curEnd, readEnd)
                 else -> readEnd
             },
         )
