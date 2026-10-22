@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import android.graphics.Bitmap
+import com.leandro.f1clashcoach.core.engine.TextLine
 import com.leandro.f1clashcoach.ai.Diag
 
 /**
@@ -67,7 +68,7 @@ class FrameProcessor(
         LiveState.lastFrame = bitmap
         Diag.framesRead++
         val t0 = System.currentTimeMillis()
-        val lines = try { ocr.read(bitmap) } catch (e: Exception) {
+        val lines = try { clubRepColumn(ocr.read(bitmap), bitmap) } catch (e: Exception) {
             Diag.error("OCR: " + (e.message ?: e.javaClass.simpleName)); return GameScreen.UNKNOWN
         }
         Diag.lastOcrMs = System.currentTimeMillis() - t0
@@ -97,6 +98,26 @@ class FrameProcessor(
     }
 
     fun close() { runCatching { ocr.close() } }
+
+    /**
+     * Aba Membros do clube: o "0" (e às vezes "5", "20") sozinho ao lado da estrela escapa do OCR da tela
+     * inteira, e quem tem 0★ é justamente quem a regra manda excluir. Relê só a coluna de reputação ampliada.
+     */
+    private suspend fun clubRepColumn(lines: List<TextLine>, bmp: Bitmap): List<TextLine> {
+        val isMembers = lines.any { it.text.contains("Ranking", true) } &&
+            lines.count { it.text.trim().equals("Membro", true) || it.text.contains("Capit", true) } >= 3
+        if (!isMembers) return lines
+        return runCatching {
+            val x0 = (bmp.width * 0.72f).toInt(); val cw = bmp.width - x0
+            val crop = Bitmap.createBitmap(bmp, x0, 0, cw, bmp.height)
+            val big = Bitmap.createScaledBitmap(crop, cw * 2, bmp.height * 2, true)
+            val fx = x0.toFloat() / bmp.width; val fw = cw.toFloat() / bmp.width
+            val read = ocr.read(big).map { t -> TextLine(t.text, fx + t.left * fw, t.top, fx + t.right * fw, t.bottom) }
+            if (big !== crop) big.recycle(); crop.recycle()
+            val nums = read.filter { Regex("""^[\dOo][\dOo.,]*\W?$""").matches(it.text.trim()) }
+            lines.filterNot { l -> l.left > fx - 0.02f && nums.any { n -> kotlin.math.abs(n.top - l.top) < 0.01f } } + nums
+        }.getOrDefault(lines)
+    }
 
     /** Cartas de piloto: a cor do fundo diz a raridade (azul comum, laranja rara, roxo épica). */
     private fun withRarity(p: ParsedScreen, bmp: Bitmap): ParsedScreen {
@@ -257,7 +278,7 @@ class FrameProcessor(
                     (a.driverGain?.let { gn -> "\nGanho: ULT +${gn.overtaking} DEF +${gn.defending} QUA +${gn.qualifying} LAR +${gn.raceStart} PNEU +${gn.tyreManagement}" } ?: ""), pin = false)
             }
             GameScreen.PIT_PASS, GameScreen.HOME -> {
-                if (g.seasonName != null && g.seasonLeftMs != null) app.store.upsertEvent(GameMode.SEASON, "Pit Pass ${g.seasonName}", g.seasonLeftMs)
+                if (g.seasonName != null && g.seasonLeftMs != null) app.store.upsertEvent(GameMode.SEASON, "Pit Pass ${g.seasonName}", g.seasonLeftMs, trustName = p.screen == GameScreen.PIT_PASS)
                 if (g.freeCrateReady) overlay.showMessage("🎁 Caixote grátis disponível — abra antes de correr.", pin = false)
             }
             GameScreen.CLUB -> {
@@ -274,10 +295,12 @@ class FrameProcessor(
             }
             GameScreen.TEAM_CARS, GameScreen.TEAM_DRIVERS -> {
                 val ready = com.leandro.f1clashcoach.core.engine.UpgradePlanner.plan(d.garage).ranked.filter { it.canUpgradeNow }
+                val cat = com.leandro.f1clashcoach.core.model.Catalog
+                fun nice(n: String) = cat.findPart(n)?.name ?: cat.displayName(n)
                 overlay.showMessage(
-                    "🔧 Garagem: ${d.garage.parts.size} peças • ${d.garage.drivers.size} pilotos • pontuação ${d.garage.teamScore}\n" +
-                        (if (ready.isEmpty()) "Nenhum item com cartas suficientes." else "⬆️ Prontos para evoluir: ${ready.take(4).joinToString { it.name }}" + if (ready.size > 4) " (+${ready.size - 4})" else "") +
-                        (d.garage.drivers.filter { it.equipped && it.legendary }.takeIf { it.isNotEmpty() }?.let { "\n👑 Lendário escalado: ${it.joinToString { x -> x.name }} (alguns GPs proíbem)" } ?: ""),
+                    (if (ready.isEmpty()) "Nada com cartas suficientes para evoluir agora." else "⬆️ Pode evoluir: ${ready.take(4).joinToString { nice(it.name) }}" + if (ready.size > 4) " (+${ready.size - 4})" else "") +
+                        (d.garage.drivers.filter { it.equipped && it.legendary }.takeIf { it.isNotEmpty() }?.let { "\n👑 Lendário escalado: ${it.joinToString { x -> x.name }} (alguns GPs proíbem)" } ?: "") +
+                        "\n🔧 Garagem: ${d.garage.parts.size} peças • ${d.garage.drivers.size} pilotos • pontuação ${d.garage.teamScore}",
                     pin = false,
                 )
             }
@@ -358,7 +381,7 @@ class FrameProcessor(
                         image = AiImage(ImageUtils.toJpeg(frame), "image/jpeg"), webSearch = true))
                 }.onSuccess { a ->
                     app.store.setEventAdvice(ev.id, a.text)
-                    overlay.showMessage("🤖 ${mode.label}: $title\n\n${a.text}")
+                    overlay.showMessage("🤖 ${mode.label}: $title\n\n${a.text}", pin = false)
                     LiveState.event("IA analisou: $title")
                 }.onFailure { LiveState.event("IA não analisou $title: ${it.message}") }
             }

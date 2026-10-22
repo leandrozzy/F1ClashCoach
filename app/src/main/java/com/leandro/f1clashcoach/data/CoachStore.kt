@@ -80,7 +80,11 @@ class CoachStore(context: Context) {
     private fun migrate(d: CoachData): CoachData = runCatching {
         val c = com.leandro.f1clashcoach.core.model.Catalog
         d.copy(
-            garage = c.enrich(c.dedupe(d.garage)),
+            garage = c.enrich(c.dedupe(d.garage)).let { g -> g.copy(boosters = com.leandro.f1clashcoach.core.engine.Boosters.normalize(g.boosters), clubName = com.leandro.f1clashcoach.core.engine.ClubManager.cleanClubName(g.clubName)) },
+            events = d.events.filter { it.mode != GameMode.SEASON } +
+                listOfNotNull(d.events.filter { it.mode == GameMode.SEASON }.let { l ->
+                    l.maxByOrNull { it.lastSeen }?.copy(endsAt = l.mapNotNull { it.endsAt }.maxOrNull())
+                }),
             club = d.club.copy(
                 members = com.leandro.f1clashcoach.core.engine.ClubManager.dedupe(d.club.members),
                 // regra já salva é relida com o leitor novo (entende Exibição atual/anterior, promoção, rebaixamento)
@@ -188,19 +192,32 @@ class CoachStore(context: Context) {
 
     // ---------- Eventos / modos ----------
     /** Registra um evento visto na tela. Retorna o evento e se é novo. */
-    fun upsertEvent(mode: GameMode, name: String, timeLeftMs: Long?, now: Long = System.currentTimeMillis()): Pair<ActiveEvent, Boolean> {
-        val key = (mode.name + ":" + name.trim().lowercase()).replace(Regex("\\s+"), " ")
-        val cur = _data.value.events.firstOrNull { it.id == key }
-        val ev = (cur ?: ActiveEvent(key, mode, name.trim(), firstSeen = now)).copy(
+    fun upsertEvent(mode: GameMode, name: String, timeLeftMs: Long?, now: Long = System.currentTimeMillis(), trustName: Boolean = true): Pair<ActiveEvent, Boolean> {
+        // Passe da temporada é um só: leituras com número trocado pelo OCR ("Exibição 72", "Exibição 1") não viram outro evento.
+        val single = mode == GameMode.SEASON
+        val cur = if (single) _data.value.events.filter { it.mode == mode && !it.isOver(now) }.maxByOrNull { it.lastSeen }
+        else _data.value.events.firstOrNull { it.id == eventKey(mode, name) }
+        val newName = if (cur != null && single && !trustName) cur.name else name.trim()
+        val key = eventKey(mode, newName)
+        val readEnd = timeLeftMs?.let { now + it }
+        val ev = (cur ?: ActiveEvent(key, mode, newName, firstSeen = now)).copy(
+            id = key, name = newName,
             lastSeen = now,
-            endsAt = timeLeftMs?.let { now + it } ?: cur?.endsAt,
+            // o timer do passe só cresce de leitura para leitura se o OCR pegou o de outro quadro: fica o maior
+            endsAt = when {
+                readEnd == null -> cur?.endsAt
+                single && cur?.endsAt != null && !trustName -> maxOf(cur.endsAt, readEnd)
+                else -> readEnd
+            },
         )
         update { d ->
-            val others = d.events.filterNot { it.id == key || it.isOver(now) }
+            val others = d.events.filterNot { it.id == key || it.id == cur?.id || (single && it.mode == mode) || it.isOver(now) }
             d.copy(events = (others + ev).takeLast(30))
         }
         return ev to (cur == null)
     }
+
+    private fun eventKey(mode: GameMode, name: String) = (mode.name + ":" + name.trim().lowercase()).replace(Regex("\\s+"), " ")
 
     fun setEventAdvice(id: String, advice: String) = update { d ->
         d.copy(events = d.events.map { if (it.id == id) it.copy(aiAdvice = advice, aiAdviceAt = System.currentTimeMillis()) else it })

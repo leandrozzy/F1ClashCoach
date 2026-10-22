@@ -110,7 +110,12 @@ migração dos dados salvos em `CoachStore.migrate`), lendários e especiais; re
 cartões automáticos de conselho (`core/engine/Advisor.kt`) na Início; Garagem no estilo do jogo (4 por linha,
 abas Pilotos/Lendários/Especiais/Carros/Reforços, fotos recortadas em `ArtStore`, pasta `art2`); chat de IA
 só opcional (ícone no topo).
-Não validado no aparelho: conselhos durante a corrida (pit/reforços) e o visual novo (só compilado no CI).
+Vídeo do app 1.0.33 (out/2026, Miami 6 voltas, vitória) corrigido: pit mandado na última volta ("faltando 0"),
+painel cobrindo o meio do jogo (agora avisos automáticos só na faixa do topo; painel só ao tocar a bolinha),
+reforços com pedaços de nome ("negativa", "ghoul"; `Boosters.normalize`), passe da temporada repetido com
+número errado (um só evento SEASON), GP duplicado na Início, "FLA FL", membros com 0★ não lidos (app relê a
+coluna de reputação ampliada), fotos ruins ("Pilot", preto: `ArtStore.looksLikePhoto`), Especiais x/8.
+Não validado no aparelho: essas correções do `:app` (só CI) e a leitura do 0★ com ML Kit.
 
 ## Convenções
 - Lógica e leitura no `:core` (puro, testável); `:app` só captura, persistência, UI e Android.

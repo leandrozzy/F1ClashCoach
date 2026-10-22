@@ -105,7 +105,8 @@ fun RaceScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
     val data by vm.store.data.collectAsState()
     val live by LiveState.status.collectAsState()
     val race = live.race
-    var trackId by rememberSaveable { mutableStateOf(TrackCatalog.tracks.first().id) }
+    // começa na pista da última corrida lida (não no Bahrein fixo)
+    var trackId by rememberSaveable { mutableStateOf(data.races.maxByOrNull { it.timestamp }?.trackId?.takeIf { TrackCatalog.byId(it) != null } ?: TrackCatalog.tracks.first().id) }
     var laps by remember { mutableIntStateOf(race.laps ?: data.series[data.garage.series]?.laps ?: 6) }
     val track = TrackCatalog.byId(trackId)!!
     val owned = remember(data.garage.boosters) { Boosters.owned(data.garage.boosters).sortedByDescending { it.count } }

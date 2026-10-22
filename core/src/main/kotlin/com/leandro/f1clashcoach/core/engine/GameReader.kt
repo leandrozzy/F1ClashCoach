@@ -799,10 +799,16 @@ object GameReader {
             val name = ls.filter { it !== role && it.t.left in 0.2f..0.35f && it.cy < role.cy && role.cy - it.cy < 0.035f && roleOf(it) == null }
                 .maxByOrNull { it.cy } ?: continue
             val rep = ls.filter { it.cx > 0.7f && abs(it.cy - name.cy) < 0.02f }
-                .firstNotNullOfOrNull { l -> Regex("""^[\d.,]+$""").find(l.t.text.trim())?.let { Txt.bigNumber(it.value) } } ?: continue
+                .firstNotNullOfOrNull { l -> repNumber(l.t.text) } ?: continue
             out += ClubMemberRead(name.t.text.trim(), r, rep)
         }
         return out
+    }
+
+    /** Reputação do membro: só número (o "0" às vezes vem como "O"; a estrela pode colar no fim). */
+    private fun repNumber(text: String): Long? {
+        val t = text.trim().trimEnd('★', '☆', '*', '+', ' ').replace('O', '0').replace('o', '0')
+        return if (Regex("""^\d[\d.,]*$""").matches(t)) Txt.bigNumber(t) else null
     }
 
     /** Regras do clube: frases da descrição que falam de mínimo, reputação, inatividade ou expulsão. */

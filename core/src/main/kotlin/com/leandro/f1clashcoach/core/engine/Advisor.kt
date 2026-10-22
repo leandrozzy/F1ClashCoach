@@ -59,7 +59,7 @@ object Advisor {
             val left = gp.roundEndsAt?.let { it - now }
             val plan = GpPlanner.plan(garage, gp)
             out += AdviceCard("gp", "🏆", "Grand Prix: ${gp.name}" + (left?.let { " • faltam ${DailyBriefing.formatLeft(it)}" } ?: ""),
-                plan.lines.take(4), if (left != null && left < 12 * H) 0 else 1, AdviceTarget.GAME)
+                plan.lines.filterNot { it.trim().startsWith("Nível: ?") }.take(4), if (left != null && left < 12 * H) 0 else 1, AdviceTarget.GAME)
         }
 
         // 3) Reforços: plano da próxima corrida com o que você tem.
@@ -104,6 +104,8 @@ object Advisor {
         // 7) Eventos e objetivos com prazo (do resumo diário).
         DailyBriefing.build(garage, races, events, tyreObs, lastMetaTime, now, objectives, gp)
             .filter { it.icon in setOf("⏱", "📋", "🎯", "🎁", "⭐") || it.priority == 0 }
+            // o GP já tem cartão próprio acima
+            .filterNot { out.any { c -> c.id == "gp" } && (it.icon == "🏆" || it.title.startsWith("Grand Prix")) }
             .take(3).forEachIndexed { i, b ->
                 out += AdviceCard("brief$i", b.icon, b.title, listOf(b.detail).filter { it.isNotBlank() }, b.priority.coerceAtMost(3),
                     when (b.action) {

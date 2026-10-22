@@ -46,8 +46,8 @@ object GameSync {
         read.series?.let { if (it != g.series) { g = g.copy(series = it); changes += "Série $it" } }
         read.teamScore?.let { if (it != g.teamScore) { g = g.copy(teamScore = it); changes += "Pontuação da equipe $it" } }
         read.carTotals?.let { if (it != g.carTotals) { g = g.copy(carTotals = it); changes += "Atributos do carro" } }
-        if (read.boosters.isNotEmpty()) g = g.copy(boosters = g.boosters + read.boosters)
-        read.clubName?.let { g = g.copy(clubName = it) }
+        if (read.boosters.isNotEmpty()) g = g.copy(boosters = Boosters.normalize(g.boosters) + Boosters.normalize(read.boosters))
+        read.clubName?.let { g = g.copy(clubName = ClubManager.cleanClubName(it)) }
         if (read.featured.isNotEmpty()) {
             val fresh = now - g.featuredSeenAt > 3L * 86_400_000
             val list = (if (fresh) read.featured else (g.featuredAssets + read.featured)).distinct()

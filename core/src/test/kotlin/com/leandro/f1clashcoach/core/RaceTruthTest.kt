@@ -34,6 +34,23 @@ class RaceTruthTest {
         assertTrue(c.text.contains("sem parada"))
     }
 
+    @Test fun neverBoxOnLastLap() {
+        // Miami 6 voltas (vídeo do app): volta 6 com 43% gastando 40%/volta mandava "BOX nesta volta (faltando 0)".
+        val w = LiveWear()
+        w.observe(0, 4, Tyre.MEDIUM, 100); w.observe(0, 5, Tyre.MEDIUM, 60); w.observe(0, 6, Tyre.MEDIUM, 43)
+        val c = w.call(0, 6, 6, Tyre.MEDIUM, 43, ranges, times)!!
+        assertNull(c.pitAtEndOfLap)
+        assertTrue(c.text, c.text.contains("sem parada"))
+    }
+
+    @Test fun noStopForLastLapWhenTyreAlmostLasts() {
+        // Volta 5 de 6 com 50% gastando 30%/volta: acaba com ~0%, não vale 20 s de pit.
+        val w = LiveWear()
+        w.observe(1, 3, Tyre.MEDIUM, 100); w.observe(1, 5, Tyre.MEDIUM, 50)
+        val c = w.call(1, 5, 6, Tyre.MEDIUM, 50, ranges, times)!!
+        assertNull(c.pitAtEndOfLap)
+    }
+
     @Test fun usesGameRangeBeforeFirstLap() {
         val c = LiveWear().call(0, 1, 8, Tyre.SOFT, 100, ranges, times)!!
         assertTrue(!c.measured)

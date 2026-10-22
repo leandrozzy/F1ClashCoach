@@ -230,13 +230,15 @@ class OverlayController(
             // A mesma mensagem chega a cada leitura da tela: só atualiza o texto, não reabre o painel.
             if (text == lastMsg) { if (!pinned) body.text = text; return@post }
             lastMsg = text
-            val racing = System.currentTimeMillis() - raceAt < 8000
-            if (racing && !pin) {
-                // Na corrida: só a faixa do topo (não bloqueia o toque).
+            if (!pin) {
+                // Aviso automático: nunca abre o painel por cima do jogo. Passa 1–2 linhas na faixa do
+                // topo (não recebe toques) e o texto completo fica na bolinha para quem quiser abrir.
+                if (!pinned) body.text = text
+                bubble.text = if (expanded) "✕" else "💬"
                 ticker?.let { tk ->
-                    tk.text = text.lineSequence().firstOrNull { it.isNotBlank() }?.take(90) ?: return@post
+                    tk.text = text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.take(2).joinToString("\n").take(140)
                     tk.visibility = View.VISIBLE
-                    main.removeCallbacks(hideTicker); main.postDelayed(hideTicker, 6000)
+                    main.removeCallbacks(hideTicker); main.postDelayed(hideTicker, 7000)
                 }
                 return@post
             }

@@ -41,10 +41,33 @@ object ArtStore {
         cache.get(key)?.let { return it }
         val f = File(dir(ctx), "$key.jpg")
         if (!f.exists()) return null
-        return runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()?.also { cache.put(key, it) }
+        val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() ?: return null
+        // recorte ruim salvo por versão anterior: apaga para ser refeito na próxima leitura
+        if (!looksLikePhoto(bmp)) { f.delete(); return null }
+        return bmp.also { cache.put(key, it) }
     }
 
     /** Recorta a arte das cartas da grade (área acima do nome). Atualiza no máx. 1x por dia por carta. */
+    /**
+     * Rejeita recorte que não é foto de carta: quase tudo branco/preto/cinza liso (texto "Piloto" de outra
+     * tela, faixa preta, carta bloqueada). Foto de verdade tem cor e contraste.
+     */
+    private fun looksLikePhoto(b: Bitmap): Boolean {
+        val n = 12
+        var flat = 0; var sum = 0.0; var sum2 = 0.0; var total = 0
+        for (i in 0 until n) for (j in 0 until n) {
+            val c = b.getPixel((b.width - 1) * i / (n - 1), (b.height - 1) * j / (n - 1))
+            val r = (c shr 16) and 0xff; val g = (c shr 8) and 0xff; val bl = c and 0xff
+            val lum = 0.3 * r + 0.59 * g + 0.11 * bl
+            val sat = maxOf(r, g, bl) - minOf(r, g, bl)
+            if (sat < 18 && (lum > 225 || lum < 40)) flat++
+            sum += lum; sum2 += lum * lum; total++
+        }
+        val mean = sum / total
+        val sd = kotlin.math.sqrt((sum2 / total - mean * mean).coerceAtLeast(0.0))
+        return flat < total * 0.45 && sd > 18
+    }
+
     fun captureTiles(ctx: Context, frame: Bitmap, tiles: List<GridTile>, isPart: Boolean) {
         val w = frame.width; val h = frame.height
         var saved = 0
@@ -60,9 +83,11 @@ object ArtStore {
             // só o miolo da foto: sem a setinha do canto e sem o selo "+10%" (o app desenha os dele)
             val x0 = ((t.nameLeft + 0.04f) * w).toInt(); val y0 = ((t.nameTop - 0.088f) * h).toInt()
             val cw = (0.145f * w).toInt(); val ch = (0.066f * h).toInt()
-            if (x0 < 0 || y0 < 0 || x0 + cw > w || y0 + ch > h || cw < 20 || ch < 20) continue
+            // foto escondida sob as abas/filtros do topo (lista rolada) sai cortada: pula
+            if (x0 < 0 || y0 < (0.115f * h).toInt() || x0 + cw > w || y0 + ch > h || cw < 20 || ch < 20) continue
             runCatching {
                 val crop = Bitmap.createBitmap(frame, x0, y0, cw, ch)
+                if (!looksLikePhoto(crop)) { crop.recycle(); return@runCatching }
                 val scaled = Bitmap.createScaledBitmap(crop, 180, (180f * ch / cw).toInt().coerceAtLeast(40), true)
                 f.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 86, it) }
                 cache.remove(key)

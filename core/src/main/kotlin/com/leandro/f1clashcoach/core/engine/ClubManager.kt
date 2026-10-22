@@ -92,6 +92,9 @@ object ClubManager {
     }
 
     /** "Exibicao70" / "Exibição 70" → "Exibição 70". */
+    /** "FLA FL" / "FLA Fl" → "FLA F1": a fonte do jogo faz o "1" de F1 parecer "l"/"I". */
+    fun cleanClubName(name: String): String = name.trim().replace(Regex("""(^|\s)F[lLI|](?=\s|$)"""), "$1F1")
+
     fun leagueKey(name: String?): String = name?.let { Regex("""(\d{1,3})""").find(it)?.groupValues?.get(1) }?.let { "Exibição $it" } ?: "atual"
 
     /** Junta membros repetidos (variações de OCR já salvas), ficando com o histórico mais completo. */

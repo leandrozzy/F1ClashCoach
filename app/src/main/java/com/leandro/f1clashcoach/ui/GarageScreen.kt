@@ -97,7 +97,9 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
         GTab.DRIVERS -> listOf(Rarity.COMMON, Rarity.RARE, Rarity.EPIC, Rarity.UNKNOWN).map { r ->
             (if (r == Rarity.UNKNOWN) "Raridade a confirmar" else r.label + "s") to normal.filter { it.rarity == r } }
         GTab.LEGENDS -> listOf("Pilotos lendários" to legends)
-        GTab.SPECIALS -> specials.groupBy { it.edition.ifBlank { "Edições especiais" } }.toList().ifEmpty { listOf("Edições especiais" to emptyList()) }
+        GTab.SPECIALS -> specials.groupBy { it.edition.ifBlank { "Edições especiais" } }.let { m ->
+            // as duas coleções do jogo aparecem mesmo sem carta (como lá: 0/8)
+            (listOf("Escolhas do Paddock", "Escolhas do Paddock: Turbo") + m.keys).distinct().map { it to (m[it] ?: emptyList()) } }
         GTab.CARS -> PartSlot.entries.map { sl -> sl.label to parts.filter { it.slot == sl } }
         GTab.BOOSTERS -> emptyList()
     }
@@ -166,13 +168,15 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
         }
         groups.forEach { (title, list0) ->
             val list = list0.filter { keep(it) }.sortedWith(order)
-            if (list0.isEmpty() || list.isEmpty()) return@forEach
+            // tamanho de cada coleção especial no jogo (8 cartas cada); as outras: o que o catálogo tem
+            val total = if (tab == GTab.SPECIALS && title.startsWith("Escolhas do Paddock")) 8 else list0.size
+            if (tab != GTab.SPECIALS && (list0.isEmpty() || list.isEmpty())) return@forEach
             item(span = { GridItemSpan(maxLineSpan) }, key = "h_$title") {
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Navy).padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                     val slot = PartSlot.entries.firstOrNull { it.label == title }
                     if (slot != null) { PartIcon(slot, F1Red, 16.dp); Spacer(Modifier.width(6.dp)) }
                     Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, color = Color.White, modifier = Modifier.weight(1f))
-                    Text("${list0.count { it.owned }}/${list0.size}", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White)
+                    Text("${list0.count { it.owned }}/$total", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White)
                 }
             }
             items(list, key = { it.name + it.rarity.name + it.edition + (it.slot?.name ?: "") }) { item -> AssetCard(item) { detail = item } }

@@ -95,6 +95,13 @@ object Boosters {
         return all.firstOrNull { key(it).length >= 5 && Txt.lev(key(it), k, 2) <= (if (k.length >= 9) 2 else 1) }
     }
 
+    /**
+     * Estoque limpo: nome do catálogo, sem pedaços de OCR ("negativa", "ghoul", "IVIáxima"), sem repetidos.
+     * O número na tela é o total atual, então repetidos ficam com o maior valor (não somam).
+     */
+    fun normalize(counts: Map<String, Int>): Map<String, Int> =
+        counts.mapNotNull { (n, c) -> find(n)?.let { it.name to c } }.groupBy({ it.first }, { it.second }).mapValues { (_, v) -> v.max() }
+
     fun owned(counts: Map<String, Int>): List<BoosterOwned> =
         counts.map { (n, c) -> find(n).let { d -> BoosterOwned(d, d?.name ?: n, c) } }.groupBy { it.name }
             .map { (n, l) -> BoosterOwned(l.first().def, n, l.maxOf { it.count }) }

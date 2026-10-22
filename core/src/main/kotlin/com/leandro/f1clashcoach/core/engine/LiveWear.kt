@@ -71,12 +71,17 @@ class LiveWear {
         val usable = (life - 10).coerceAtLeast(0)
         val lapsLeft = usable / rate
         val name = "P${driver + 1}"
-        if (lapsLeft >= remaining) {
-            val atEnd = (life - rate * remaining).toInt().coerceAtLeast(0)
+        val atEndRaw = life - rate * remaining
+        // Parar custa ~20 s: na última volta nunca compensa; e se o pneu só acaba nos metros finais, segue.
+        val reachesEnd = lapsLeft >= remaining || remaining <= 1 || atEndRaw >= -rate * 0.35
+        val pitLapRaw = (lap + floor(lapsLeft).toInt() - 1).coerceAtLeast(lap)
+        if (reachesEnd || pitLapRaw >= totalLaps) {
+            val atEnd = atEndRaw.toInt().coerceAtLeast(0)
             return PitCall(driver, tyre, life, rate, measured != null, null, null, atEnd,
-                "$name: sem parada — o ${tyre.short} chega ao fim com ~$atEnd%" + if (measured == null) " (pela faixa do jogo)" else "", false)
+                "$name: sem parada — o ${tyre.short} chega ao fim" + (if (atEnd > 0) " com ~$atEnd%" else " no limite") +
+                    if (measured == null) " (pela faixa do jogo)" else "", false)
         }
-        val pitLap = (lap + floor(lapsLeft).toInt() - 1).coerceAtLeast(lap)
+        val pitLap = pitLapRaw
         val after = totalLaps - pitLap
         // pneu seguinte: o mais rápido cuja faixa (do jogo) cobre as voltas que faltam
         val dry = listOf(Tyre.SOFT, Tyre.MEDIUM, Tyre.HARD)

@@ -131,3 +131,19 @@ class ClubRuleTest {
         assertEquals(s.members.map { it.name }.toString(), 4, s.members.size)
     }
 }
+
+class ClubNameAndBoostersTest {
+    @org.junit.Test fun clubNameF1() {
+        org.junit.Assert.assertEquals("FLA F1", com.leandro.f1clashcoach.core.engine.ClubManager.cleanClubName("FLA FL"))
+        org.junit.Assert.assertEquals("FLA F1", com.leandro.f1clashcoach.core.engine.ClubManager.cleanClubName("FLA Fl"))
+        org.junit.Assert.assertEquals("Flamengo", com.leandro.f1clashcoach.core.engine.ClubManager.cleanClubName("Flamengo"))
+    }
+
+    @org.junit.Test fun boosterStockWithoutOcrFragments() {
+        // estoque salvo pela versão anterior (visto no vídeo do app): pedaços de nome e lixo de OCR
+        val saved = mapOf("Sustentação negativa" to 57, "negativa" to 57, "Combustível de ghoul" to 24, "ghoul" to 24,
+            "Transmissão Máxima" to 7, "Máxima" to 7, "IVIáxima" to 7, "Máxia" to 7, "IN" to 3, "NE" to 2, "Autocontrole" to 125)
+        val n = com.leandro.f1clashcoach.core.engine.Boosters.normalize(saved)
+        org.junit.Assert.assertEquals(mapOf("Sustentação negativa" to 57, "Combustível de ghoul" to 24, "Transmissão Máxima" to 7, "Autocontrole" to 125), n)
+    }
+}
