@@ -35,11 +35,11 @@ fun NewsScreen(vm: MainViewModel, modifier: Modifier, onOpenUrl: (String) -> Uni
         items(news) { n ->
             Column(Modifier.fillMaxWidth().clickable { onOpenUrl(n.url) }.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(n.title, fontSize = 14.sp)
-                Text(n.source, fontSize = 11.sp, color = Muted)
+                Text(n.source, fontSize = 11.sp, color = InkMuted)
             }
         }
-        if (!loading && news.isEmpty()) item { Text("Nada carregado. Verifique a internet ou use o resumo com IA.", color = Muted, modifier = Modifier.padding(16.dp)) }
-        if (errors.isNotEmpty()) item { Text("Fontes indisponíveis: " + errors.joinToString(), fontSize = 11.sp, color = Muted, modifier = Modifier.padding(16.dp)) }
+        if (!loading && news.isEmpty()) item { Text("Nada carregado. Verifique a internet ou use o resumo com IA.", color = InkMuted, modifier = Modifier.padding(16.dp)) }
+        if (errors.isNotEmpty()) item { Text("Fontes indisponíveis: " + errors.joinToString(), fontSize = 11.sp, color = InkMuted, modifier = Modifier.padding(16.dp)) }
         item { OutlinedButton(onClick = { vm.loadNews() }, modifier = Modifier.fillMaxWidth().padding(12.dp)) { Text("Recarregar") } }
     }
 }

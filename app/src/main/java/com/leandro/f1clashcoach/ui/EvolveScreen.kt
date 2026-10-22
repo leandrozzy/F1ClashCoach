@@ -96,16 +96,16 @@ fun EvolveScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
             val allDrivers = remember(data.garage) { Catalog.driverCollection(data.garage) }
             val allParts = remember(data.garage) { Catalog.partCollection(data.garage) }
             SectionCard("🎯 Melhores cartas para a Série 12") {
-                Text("As mais fortes no nível máximo. Coloridas = você tem; cinza = buscar em caixotes, loja e eventos.", fontSize = 12.sp, color = Muted)
+                Text("As mais fortes que você consegue obter até a Série 12 (lendárias e especiais só se já tiver). Coloridas = você tem; cinza = buscar em caixotes, loja e eventos.", fontSize = 12.sp, color = Muted)
                 SectionTitle("Pilotos")
-                allDrivers.sortedByDescending { it.maxTotal }.distinctBy { it.name }.take(6).chunked(3).forEach { row ->
+                allDrivers.filter { reachable(it) }.sortedByDescending { it.maxTotal }.distinctBy { it.name }.take(6).chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
                 SectionTitle("Peças (a melhor de cada tipo)")
-                PartSlot.entries.mapNotNull { sl -> allParts.filter { it.slot == sl }.maxByOrNull { it.maxTotal } }.chunked(3).forEach { row ->
+                PartSlot.entries.mapNotNull { sl -> allParts.filter { it.slot == sl && reachable(it) }.maxByOrNull { it.maxTotal } }.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { Box(Modifier.weight(1f)) { AssetCard(it) { } } }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -142,7 +142,7 @@ fun EvolveScreen(vm: MainViewModel, modifier: Modifier, goAi: () -> Unit) {
         items(data.races.sortedByDescending { it.timestamp }.take(100), key = { it.id }) { r ->
             Column(Modifier.fillMaxWidth().clickable { removeRace = r }.padding(horizontal = 18.dp, vertical = 6.dp)) {
                 Text("${if (r.won == true) "🏆" else if (r.won == false) "❌" else "•"} ${TrackCatalog.byId(r.trackId)?.name ?: r.trackId}  ${r.weather.label}  ${r.strategy}", fontSize = 14.sp)
-                Text("${fmt.format(Date(r.timestamp))} • grid ${r.gridPositions.joinToString("/").ifEmpty { "?" }} → ${r.finishPositions.joinToString("/").ifEmpty { "?" }} • ${r.source}", fontSize = 11.sp, color = Muted)
+                Text("${fmt.format(Date(r.timestamp))} • grid ${r.gridPositions.joinToString("/").ifEmpty { "?" }} → ${r.finishPositions.joinToString("/").ifEmpty { "?" }} • ${r.source}", fontSize = 11.sp, color = InkMuted)
             }
         }
         item { Text(" ", Modifier.padding(20.dp)) }
@@ -193,3 +193,7 @@ private fun AddRaceDialog(onDismiss: () -> Unit, onSave: (RaceRecord) -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
+
+/** Carta que dá para conseguir até a Série 12: lendárias/especiais só contam se você já tem. */
+private fun reachable(c: com.leandro.f1clashcoach.core.model.CollectionItem): Boolean =
+    c.owned || (c.rarity != com.leandro.f1clashcoach.core.model.Rarity.LEGENDARY && c.rarity != com.leandro.f1clashcoach.core.model.Rarity.SPECIAL && c.series <= 12)

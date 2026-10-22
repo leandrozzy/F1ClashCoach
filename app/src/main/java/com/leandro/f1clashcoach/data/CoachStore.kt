@@ -73,8 +73,23 @@ class CoachStore(context: Context) {
     val data: StateFlow<CoachData> = _data
 
     private fun load(): CoachData = runCatching {
-        if (file.exists()) json.decodeFromString(CoachData.serializer(), file.readText()) else CoachData()
+        if (file.exists()) migrate(json.decodeFromString(CoachData.serializer(), file.readText())) else CoachData()
     }.getOrElse { CoachData() }
+
+    /** Ao abrir: junta pilotos/peças/membros repetidos por erro de leitura de versões antigas (não apaga progresso). */
+    private fun migrate(d: CoachData): CoachData = runCatching {
+        val c = com.leandro.f1clashcoach.core.model.Catalog
+        d.copy(
+            garage = c.enrich(c.dedupe(d.garage)),
+            club = d.club.copy(
+                members = com.leandro.f1clashcoach.core.engine.ClubManager.dedupe(d.club.members),
+                // regra já salva é relida com o leitor novo (entende Exibição atual/anterior, promoção, rebaixamento)
+                rules = com.leandro.f1clashcoach.core.engine.ClubManager.parseRules(d.club.rules.text).let { p ->
+                    if (d.clubRulesManual) p.copy(minRepWeek = d.club.rules.minRepWeek ?: p.minRepWeek, maxInactiveDays = d.club.rules.maxInactiveDays ?: p.maxInactiveDays) else p
+                },
+            ),
+        )
+    }.getOrDefault(d)
 
     @Synchronized
     fun update(transform: (CoachData) -> CoachData) {

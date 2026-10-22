@@ -95,6 +95,10 @@ object Catalog {
         val long = if (g.length < c.length) c else g
         if (short.length >= 4 && long.endsWith(short) && long.length - short.length <= 3) return true
         // 1 letra errada (2 em nomes longos), comparando o fim do nome do jogo com o do catálogo
+        // compara só o sobrenome (depois do último ponto); se a base tem inicial (D.Hill/G.Hill), a inicial tem que bater
+        val gs = key(game.substringAfterLast('.')); val cs = key(cat.substringAfterLast('.'))
+        val initialOk = !cat.contains('.') || (game.contains('.') && key(game).firstOrNull() == key(cat).firstOrNull())
+        if (initialOk && gs.length >= 5 && cs.length >= 5 && Txt.lev(gs, cs, 2) <= (if (cs.length >= 8) 2 else 1)) return true
         if (short.length >= 6 && long.length - short.length <= 3) {
             val tail = long.takeLast(short.length)
             // mesmo tamanho = os dois têm (ou não têm) inicial: a inicial tem que bater (D. Hill ≠ G. Hill)
@@ -141,6 +145,42 @@ object Catalog {
             if (read >= 3 && err <= 1 && err < bestErr) { best = d to i + 1; bestErr = err }
         }
         return best
+    }
+
+    // ---------------------------------------------------------------- nomes oficiais e limpeza
+
+    /** Chave única do piloto: nome do catálogo (resolve "L. LawVSon", "L.LaSon"…) ou o nome lido limpo. */
+    fun driverKey(name: String): String = findDrivers(name).firstOrNull()?.name?.let { "#$it" } ?: key(name)
+
+    /** Nome para mostrar: inicial + sobrenome do catálogo ("L. Lawson"); fora do catálogo, o lido. */
+    fun displayName(read: String): String {
+        val d = findDrivers(read).firstOrNull()?.name ?: return read.trim()
+        if (d.contains('.')) return d.replace(".", ". ")
+        val initial = read.trim().firstOrNull()?.takeIf { it.isLetter() && read.contains('.') }?.uppercaseChar()
+        return if (initial != null && read.indexOf('.') <= 2) "$initial. $d" else d
+    }
+
+    /**
+     * Junta cartas repetidas (variações de OCR já salvas): mesmo piloto + mesma raridade (+ mesma edição) vira um só,
+     * ficando com o maior progresso. Cartas de raridade desconhecida somem se o mesmo piloto já tem raridade conhecida.
+     */
+    fun dedupe(g: Garage): Garage {
+        val drivers = g.drivers.map { d ->
+            val defs = findDrivers(d.name)
+            val r = if (defs.size == 1 && d.rarity != Rarity.SPECIAL) defs[0].rarity else d.rarity
+            d.copy(name = displayName(d.name), rarity = r)
+        }
+        val knownKeys = drivers.filter { it.rarity != Rarity.UNKNOWN }.map { driverKey(it.name) }.toSet()
+        val kept = drivers.filter { it.rarity != Rarity.UNKNOWN || driverKey(it.name) !in knownKeys }
+            .groupBy { Triple(driverKey(it.name), it.rarity, it.edition) }
+            .map { (_, same) ->
+                val best = same.maxWith(compareBy<Driver>({ it.progress.level }, { it.progress.cardsNeeded }, { it.progress.cardsOwned }, { it.stats.total }))
+                best.copy(equipped = same.any { it.equipped }, featured = same.any { it.featured })
+            }
+        val parts = g.parts.map { p -> findPart(p.name)?.let { def -> p.copy(name = def.name, slot = def.slot) } ?: p }
+            .groupBy { it.name.lowercase() to it.slot }
+            .map { (_, same) -> same.maxWith(compareBy<Part>({ it.progress.level }, { it.progress.cardsNeeded }, { it.progress.cardsOwned })).copy(equipped = same.any { it.equipped }) }
+        return g.copy(drivers = kept, parts = parts)
     }
 
     // ---------------------------------------------------------------- preencher a garagem

@@ -47,7 +47,7 @@ class VideoSyncTest {
         assertTrue("peças: ${g.parts.map { it.name }}", g.parts.size >= 15)
         assertTrue(g.parts.all { it.slot in PartSlot.entries })
         val eqDrivers = g.drivers.filter { it.equipped }
-        assertEquals(listOf("D. Hill", "L.Lzwson"), eqDrivers.map { it.name })
+        assertEquals(listOf("D. Hill", "L. Lawson"), eqDrivers.map { it.name })
         assertTrue(eqDrivers.first().legendary)
         assertEquals(65, eqDrivers.first().stats.defending)
         assertTrue("pilotos: ${g.drivers.size}", g.drivers.size >= 15)

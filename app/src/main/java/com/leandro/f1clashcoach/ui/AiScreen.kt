@@ -68,16 +68,16 @@ fun AiScreen(vm: MainViewModel, modifier: Modifier, onOpenUrl: (String) -> Unit)
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
             if (data.chat.isEmpty()) item {
                 Text("Pergunte qualquer coisa sobre sua conta, mande um print do jogo ou peça o meta atual (🌐 busca na web).",
-                    color = Muted, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+                    color = InkMuted, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
             }
             items(data.chat) { m ->
                 Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), contentAlignment = if (m.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
                     Column(
                         Modifier.widthIn(max = 340.dp)
-                            .background(if (m.fromUser) F1Red.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+                            .background(if (m.fromUser) F1Red else Navy, RoundedCornerShape(14.dp))
                             .padding(10.dp)
                     ) {
-                        SelectionContainer { Text(m.text, fontSize = 14.sp) }
+                        SelectionContainer { Text(m.text, fontSize = 14.sp, color = Color.White) }
                         m.sources.take(6).forEach { s ->
                             val parts = s.split("|", limit = 2)
                             val title = parts[0]

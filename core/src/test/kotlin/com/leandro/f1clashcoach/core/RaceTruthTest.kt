@@ -64,3 +64,39 @@ class RangePlannerTest {
         assertTrue(p.first().stops >= 1) // 8 voltas: nenhum composto aguenta sozinho
     }
 }
+
+class BoosterScreenTest {
+    @Test fun readsTwoLineNamesAndCanonicalizes() {
+        val a = RealFramesTest.p("boosters_a").game!!.boosters
+        assertEquals(125, a["Autocontrole"]); assertEquals(118, a["Lastro"]); assertEquals(38, a["Instinto"])
+        assertEquals(57, a["Sustentação negativa"]); assertEquals(18, a["Hex"])
+        assertTrue(a.keys.toString(), a.keys.none { it.equals("negativa", true) || it.startsWith("Sustenta") && it != "Sustentação negativa" })
+        val b = RealFramesTest.p("boosters_b").game!!.boosters
+        assertEquals(20, b["Tire Water"]); assertEquals(27, b["Combustível de ghoul"])
+        // tudo o que foi lido existe no catálogo de 45
+        (a.keys + b.keys).forEach { assertNotNull(it, Boosters.find(it)) }
+        assertEquals(45, Boosters.all.size)
+        assertEquals(45, Boosters.all.map { it.name }.toSet().size)
+    }
+}
+
+class AdvisorTest {
+    @Test fun buildsAutomaticCardsFromRealScreens() {
+        var g = com.leandro.f1clashcoach.core.model.Garage()
+        for (k in listOf("team_cars_top", "team_cars_grid", "team_drivers_grid", "team_setup", "boosters_a", "boosters_b")) {
+            RealFramesTest.p(k).game?.let { g = com.leandro.f1clashcoach.core.engine.GameSync.apply(g, it, emptyList(), null, 1L).garage }
+        }
+        g = g.copy(coins = 46_672_703)
+        val cards = com.leandro.f1clashcoach.core.engine.Advisor.cards(g, emptyList(), emptyList(), emptyList(), null,
+            com.leandro.f1clashcoach.core.engine.ClubState(), com.leandro.f1clashcoach.core.model.SeriesCatalog.defaults, 3575, emptyList(), 0, 1L)
+        val up = cards.first { it.id == "up" }
+        assertTrue(up.lines.toString(), up.missing == null && up.lines.isNotEmpty())
+        val boost = cards.first { it.id == "boost" }
+        assertTrue(boost.lines.toString(), boost.lines.first().startsWith("Largada"))
+        assertTrue(cards.first { it.id == "club" }.missing != null)
+        // tudo que vai para "fazer agora" tem custo real e cabe no saldo
+        val plan = com.leandro.f1clashcoach.core.engine.UpgradePlanner.plan(g)
+        assertTrue(plan.doNow.all { it.coins > 0 })
+        assertTrue(plan.doNow.sumOf { it.coins.toLong() } <= g.coins)
+    }
+}

@@ -335,12 +335,26 @@ object GameReader {
     }
 
     /** Valor numérico na mesma linha, à direita (true) ou à esquerda (false) do rótulo. */
-    private fun valueNear(ls: List<L>, label: L, right: Boolean): Double? =
+    private val NUM_END = Regex("""(\d{1,4}(?:[.,]\d{1,2})?)\s*[sS]?\s*$""")
+    private val NUM_START = Regex("""^\s*(\d{1,4}(?:[.,]\d{1,2})?)\s+\D""")
+
+    /** Valor ao lado do rótulo. O OCR do celular às vezes junta tudo ("Velocidade 111", "41 Ultrapassando 59"). */
+    private fun valueNear(ls: List<L>, label: L, right: Boolean): Double? {
+        val own = label.t.text.trim()
+        if (own.count { it.isLetter() } >= 3) {
+            val m = if (right) NUM_END.find(own) else NUM_START.find(own)
+            m?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()?.let { return it }
+        }
+        return valueBeside(ls, label, right)
+    }
+
+    private fun valueBeside(ls: List<L>, label: L, right: Boolean): Double? =
         ls.filter { it !== label && sameRow(it, label) && (if (right) it.t.left > label.t.left else it.t.right < label.t.left + 0.02f) }
             .sortedBy { abs(it.cx - label.cx) }
             .firstNotNullOfOrNull { l ->
-                val s = Txt.digitsFix(l.t.text).replace(',', '.').replace(" ", "")
-                Regex("""^(\d{1,4}(?:\.\d{1,2})?)S?$""", RegexOption.IGNORE_CASE).find(s)?.groupValues?.get(1)?.toDoubleOrNull()
+                // "4.34s": o "s" de segundos sai antes de corrigir dígitos (senão "S" vira "5" e o valor se perde)
+                val s = Txt.digitsFix(l.t.text.trim().removeSuffix("s").removeSuffix("S")).replace(',', '.').replace(" ", "")
+                Regex("""^(\d{1,4}(?:\.\d{1,2})?)$""").find(s)?.groupValues?.get(1)?.toDoubleOrNull()
             }
 
     private fun labelLine(ls: List<L>, vararg kws: String): L? = ls.firstOrNull { l -> kws.any { Txt.has(l.c, it) } }
@@ -527,11 +541,21 @@ object GameReader {
 
     private fun boosters(ls: List<L>): Map<String, Int> {
         val out = LinkedHashMap<String, Int>()
-        for (n in ls) {
-            if (n.t.text.count { it.isLetter() } < 3 || n.t.text.contains("+") || n.cy < 0.2f) continue
-            if (listOf("REFORCO", "COLETE", "COMPRAR", "PRECISA", "CORRIDA", "EQUIPE").any { Txt.has(n.c, it) }) continue
-            val count = ls.firstOrNull { c -> c !== n && c.cy > n.cy && c.cy - n.cy < 0.04f && abs(c.t.left - n.t.left) < 0.06f && Regex("""^\d{1,3}$""").matches(c.t.text.trim()) }
-            if (count != null) out[n.t.text.trim()] = count.t.text.trim().toInt()
+        val skip = listOf("REFORCO", "COLETE", "COMPRAR", "PRECISA", "CORRIDA", "EQUIPE")
+        fun isNameLine(n: L) = n.t.text.count { it.isLetter() } >= 2 && !n.t.text.contains("+") && !n.t.text.contains("!") &&
+            n.cy >= 0.2f && skip.none { Txt.has(n.c, it) } && !Regex("""\d""").containsMatchIn(n.t.text)
+        val used = HashSet<L>()
+        for (n in ls.sortedBy { it.cy }) {
+            if (n in used || !isNameLine(n)) continue
+            // nome em duas linhas ("Sustentação" / "negativa", "Combustível de" / "ghoul")
+            val second = ls.firstOrNull { o -> o !== n && o !in used && isNameLine(o) && o.cy > n.cy && o.cy - n.cy < 0.022f && abs(o.t.left - n.t.left) < 0.03f }
+            val raw = listOfNotNull(n.t.text.trim(), second?.t?.text?.trim()).joinToString(" ")
+            val bottom = second ?: n
+            val count = ls.firstOrNull { c -> c !== n && c.cy > bottom.cy && c.cy - bottom.cy < 0.045f && abs(c.t.left - n.t.left) < 0.06f && Regex("""^\d{1,3}$""").matches(c.t.text.trim()) }
+                ?: continue
+            used += n; second?.let { used += it }
+            val name = (Boosters.find(raw) ?: Boosters.find(n.t.text))?.name ?: raw
+            out[name] = count.t.text.trim().toInt()
         }
         return out
     }

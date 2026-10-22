@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextOverflow
 import com.leandro.f1clashcoach.core.model.Catalog
 import com.leandro.f1clashcoach.core.model.CollectionItem
 import androidx.compose.foundation.layout.Arrangement
@@ -64,118 +66,120 @@ import java.util.UUID
 
 private enum class Own(val label: String) { ALL("Todos"), MINE("Tenho"), MISSING("Não tenho"), READY("Evoluir já") }
 
+/** Abas iguais às do jogo. */
+private enum class GTab(val label: String) { DRIVERS("Pilotos"), LEGENDS("Lendários"), SPECIALS("Especiais"), CARS("Carros"), BOOSTERS("Reforços") }
+
 @Composable
 fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
     val data by vm.store.data.collectAsState()
     val g = data.garage
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableStateOf(GTab.DRIVERS) }
     var own by remember { mutableStateOf(Own.ALL) }
-    var slotFilter by remember { mutableStateOf<PartSlot?>(null) }
-    var rarityFilter by remember { mutableStateOf<Rarity?>(null) }
-    var group by remember { mutableIntStateOf(0) }
     var detail by remember { mutableStateOf<CollectionItem?>(null) }
     var editPart by remember { mutableStateOf<Part?>(null) }
     var editDriver by remember { mutableStateOf<Driver?>(null) }
     var editAccount by remember { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { uris -> vm.scanScreenshots(uris) }
 
     val drivers = remember(g) { Catalog.driverCollection(g) }
     val parts = remember(g) { Catalog.partCollection(g) }
-    val source = if (tab == 0) drivers else parts
-    val shown = source.filter { i ->
-        when (own) {
-            Own.ALL -> true
-            Own.MINE -> i.owned
-            Own.MISSING -> !i.owned
-            Own.READY -> i.owned && i.cardsNeeded > 0 && i.cardsOwned >= i.cardsNeeded && (i.level ?: 0) < i.maxLevel
-        } && (slotFilter == null || i.slot == slotFilter) && (rarityFilter == null || i.rarity == rarityFilter) &&
-            (tab == 1 || when (group) { 1 -> i.rarity == Rarity.LEGENDARY; 2 -> i.rarity == Rarity.SPECIAL; else -> i.rarity != Rarity.LEGENDARY && i.rarity != Rarity.SPECIAL })
-    }.sortedWith(compareByDescending<CollectionItem> { it.equipped }.thenByDescending { it.owned }.thenBy { it.rarity.ordinal }.thenByDescending { it.total })
+    val normal = drivers.filter { it.rarity != Rarity.LEGENDARY && it.rarity != Rarity.SPECIAL }
+    val legends = drivers.filter { it.rarity == Rarity.LEGENDARY }
+    val specials = drivers.filter { it.rarity == Rarity.SPECIAL }
+    fun keep(i: CollectionItem) = when (own) {
+        Own.ALL -> true
+        Own.MINE -> i.owned
+        Own.MISSING -> !i.owned
+        Own.READY -> i.owned && i.cardsNeeded > 0 && i.cardsOwned >= i.cardsNeeded && (i.level ?: 0) < i.maxLevel
+    }
+    val order = compareByDescending<CollectionItem> { it.owned }.thenByDescending { it.equipped }.thenBy { it.series }.thenByDescending { it.level ?: 0 }
+    // grupos como no jogo: raridade (pilotos) ou tipo de peça (carros), cada um com "tenho/total"
+    val groups: List<Pair<String, List<CollectionItem>>> = when (tab) {
+        GTab.DRIVERS -> listOf(Rarity.COMMON, Rarity.RARE, Rarity.EPIC, Rarity.UNKNOWN).map { r ->
+            (if (r == Rarity.UNKNOWN) "Raridade a confirmar" else r.label + "s") to normal.filter { it.rarity == r } }
+        GTab.LEGENDS -> listOf("Pilotos lendários" to legends)
+        GTab.SPECIALS -> specials.groupBy { it.edition.ifBlank { "Edições especiais" } }.toList().ifEmpty { listOf("Edições especiais" to emptyList()) }
+        GTab.CARS -> PartSlot.entries.map { sl -> sl.label to parts.filter { it.slot == sl } }
+        GTab.BOOSTERS -> emptyList()
+    }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3), modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+        columns = GridCells.Fixed(4), modifier = modifier.fillMaxSize().background(Lavender),
+        contentPadding = PaddingValues(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // ---- Resumo da equipe ----
+        // ---- Escalação e pontuação (topo, como no jogo) ----
         item(span = { GridItemSpan(maxLineSpan) }) {
-            HeroCard(Modifier.clickable { editAccount = true }) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Pontuação da equipe", fontSize = 12.sp, color = Muted)
-                            Text(if (g.teamScore > 0) g.teamScore.toString() else "—", fontSize = 30.sp, fontWeight = FontWeight.Black, color = Color.White)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("${drivers.count { it.owned }}/${drivers.size} pilotos", fontSize = 12.sp, color = Color.White)
-                            Text("${parts.count { it.owned }}/${parts.size} peças", fontSize = 12.sp, color = Color.White)
-                            Text("💰 ${formatK(g.coins)}", fontSize = 12.sp, color = Gold)
-                        }
-                    }
-                    g.carTotals?.let { t ->
-                        val mx = listOf(t.speed, t.cornering, t.powerUnit, t.qualifying, t.overtakeMode).max().coerceAtLeast(1).toFloat()
-                        listOf("Velocidade" to t.speed, "Curvas" to t.cornering, "Potência" to t.powerUnit, "Classificação" to t.qualifying, "Overtake" to t.overtakeMode).forEach { (l, v) ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(l, fontSize = 11.sp, color = Muted, modifier = Modifier.width(92.dp))
-                                MiniBar(v / mx, Sky, Modifier.weight(1f))
-                                Text(" $v", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(36.dp))
-                            }
-                        }
-                        Text("Pit stop médio: ${t.pitStop}s", fontSize = 11.sp, color = Muted)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Navy).clickable { editAccount = true }.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("PONTUAÇÃO DA EQUIPE", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Muted, modifier = Modifier.weight(1f))
+                    Text(if (g.teamScore > 0) "${g.teamScore}" else "—", fontSize = 22.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, color = Color.White)
+                }
+                g.carTotals?.let { t ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BigNumber("${t.speed}", "velocid.", Color.White, Modifier.weight(1f))
+                        BigNumber("${t.cornering}", "curvas", Color.White, Modifier.weight(1f))
+                        BigNumber("${t.powerUnit}", "potência", Color.White, Modifier.weight(1f))
+                        BigNumber("${t.qualifying}", "classif.", Color.White, Modifier.weight(1f))
+                        BigNumber(if (t.pitStop > 0) "%.2fs".format(t.pitStop) else "—", "pit", Color.White, Modifier.weight(1f))
                     }
                 }
             }
         }
-        // ---- Abas e filtros ----
+        // ---- Abas ----
         item(span = { GridItemSpan(maxLineSpan) }) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterPill("Pilotos", tab == 0, icon = { HelmetIcon(Color.White, 16.dp) }) { tab = 0; slotFilter = null }
-                    FilterPill("Peças", tab == 1, icon = { PartIcon(PartSlot.ENGINE, Color.White, 16.dp) }) { tab = 1; rarityFilter = null }
-                }
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Own.entries.forEach { o -> FilterPill(o.label, own == o, Sky) { own = o } }
-                }
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (tab == 1) {
-                        FilterPill("Todas", slotFilter == null, Sky) { slotFilter = null }
-                        PartSlot.entries.forEach { sl -> FilterPill(sl.label, slotFilter == sl, Sky, icon = { PartIcon(sl, Color.White, 16.dp) }) { slotFilter = if (slotFilter == sl) null else sl } }
-                    } else {
-                        FilterPill("Normais ${drivers.count { it.owned && it.rarity != Rarity.LEGENDARY && it.rarity != Rarity.SPECIAL }}", group == 0, rarityColor(Rarity.COMMON)) { group = 0; rarityFilter = null }
-                        FilterPill("Lendários ${drivers.count { it.owned && it.rarity == Rarity.LEGENDARY }}", group == 1, rarityColor(Rarity.LEGENDARY)) { group = 1; rarityFilter = null }
-                        FilterPill("Especiais ${drivers.count { it.owned && it.rarity == Rarity.SPECIAL }}", group == 2, rarityColor(Rarity.SPECIAL)) { group = 2; rarityFilter = null }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Navy).padding(3.dp)) {
+                    GTab.entries.forEach { t ->
+                        val (count, total) = when (t) {
+                            GTab.DRIVERS -> normal.count { it.owned } to normal.size
+                            GTab.LEGENDS -> legends.count { it.owned } to 23
+                            GTab.SPECIALS -> specials.size to 16
+                            GTab.CARS -> parts.count { it.owned } to parts.size
+                            GTab.BOOSTERS -> g.boosters.values.sum() to 0
+                        }
+                        val sel = tab == t
+                        val tint = when (t) { GTab.LEGENDS -> Gold; GTab.SPECIALS -> Color(0xFF8B3FE0); else -> Color.White }
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(9.dp)).background(if (sel) Color.White else Color.Transparent).clickable { tab = t; own = Own.ALL }.padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(t.label, fontSize = 10.sp, fontWeight = FontWeight.Black, color = if (sel) Ink else tint, maxLines = 1)
+                            Text(if (total > 0) "$count/$total" else "$count", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (sel) InkMuted else Muted)
+                        }
                     }
                 }
-                if (tab == 0 && group == 0) Legend(listOf("Comum" to rarityColor(Rarity.COMMON), "Rara" to rarityColor(Rarity.RARE), "Épica" to rarityColor(Rarity.EPIC)))
-                if (source.none { it.owned }) Text("Abra Equipe › Pilotos e Carros no jogo com a leitura ligada e role a lista: suas cartas aparecem aqui coloridas. As cinzas são as que você ainda não tem.",
-                    fontSize = 12.sp, color = Warn)
+                if (tab != GTab.BOOSTERS) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Own.entries.forEach { o -> FilterPill(o.label, own == o, Navy) { own = o } }
+                }
+                val empty = when (tab) { GTab.DRIVERS -> normal.none { it.owned }; GTab.LEGENDS -> legends.none { it.owned }; GTab.SPECIALS -> specials.isEmpty(); GTab.CARS -> parts.none { it.owned }; GTab.BOOSTERS -> g.boosters.isEmpty() }
+                if (empty) Text(
+                    when (tab) {
+                        GTab.SPECIALS -> "Abra Equipe › Pilotos › Edições Especiais no jogo com a leitura ligada."
+                        GTab.LEGENDS -> "Abra Equipe › Pilotos › Pilotos Lendários no jogo e role a lista."
+                        GTab.BOOSTERS -> "Abra Equipe › Reforços no jogo e role a lista até o fim."
+                        GTab.CARS -> "Abra Equipe › Carros no jogo e role a lista até o fim."
+                        else -> "Abra Equipe › Pilotos no jogo e role a lista até o fim: suas cartas aparecem aqui com foto."
+                    }, fontSize = 12.sp, color = InkMuted)
             }
         }
-        val groups: List<Pair<String, List<CollectionItem>>> = if (tab == 0) when (group) {
-            0 -> listOf(Rarity.EPIC, Rarity.RARE, Rarity.COMMON, Rarity.UNKNOWN).map { r -> (if (r == Rarity.UNKNOWN) "Raridade a confirmar" else r.label + "s") to shown.filter { it.rarity == r } }
-            1 -> listOf("Pilotos lendários" to shown)
-            else -> shown.groupBy { it.edition.ifBlank { "Edições especiais" } }.toList()
-        } else PartSlot.entries.map { sl -> sl.label to shown.filter { it.slot == sl } }
-        groups.filter { it.second.isNotEmpty() }.forEach { (title, list) ->
+        if (tab == GTab.BOOSTERS) {
+            val owned = com.leandro.f1clashcoach.core.engine.Boosters.owned(g.boosters).sortedByDescending { it.count }
+            items(owned, span = { GridItemSpan(2) }, key = { "b_" + it.name }) { b -> BoosterTile(b) }
+        }
+        groups.forEach { (title, list0) ->
+            val list = list0.filter { keep(it) }.sortedWith(order)
+            if (list0.isEmpty() || list.isEmpty()) return@forEach
             item(span = { GridItemSpan(maxLineSpan) }, key = "h_$title") {
-                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Navy).padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                     val slot = PartSlot.entries.firstOrNull { it.label == title }
-                    if (slot != null) { PartIcon(slot, Color.White, 18.dp); Spacer(Modifier.width(6.dp)) }
-                    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
-                    Text("${list.count { it.owned }}/${list.size}", fontSize = 12.sp, color = Muted)
+                    if (slot != null) { PartIcon(slot, F1Red, 16.dp); Spacer(Modifier.width(6.dp)) }
+                    Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, color = Color.White, modifier = Modifier.weight(1f))
+                    Text("${list0.count { it.owned }}/${list0.size}", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White)
                 }
             }
             items(list, key = { it.name + it.rarity.name + it.edition + (it.slot?.name ?: "") }) { item -> AssetCard(item) { detail = item } }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) { Text("📷 Ler prints", fontSize = 12.sp) }
-                    OutlinedButton(onClick = { if (tab == 1) editPart = Part(UUID.randomUUID().toString(), PartSlot.ENGINE, "") else editDriver = Driver(UUID.randomUUID().toString(), "") }, modifier = Modifier.weight(1f)) {
-                        Text(if (tab == 1) "+ Peça manual" else "+ Piloto manual", fontSize = 12.sp)
-                    }
-                }
-                Text("Dados de todos os níveis: catálogo da comunidade, temporada ${Catalog.season}.", fontSize = 10.sp, color = Muted)
-            }
+            Text("Atributos e custos de todos os níveis: catálogo da comunidade, temporada ${Catalog.season}. Toque numa carta para ver detalhes.",
+                fontSize = 10.sp, color = InkMuted, modifier = Modifier.padding(top = 8.dp, bottom = 40.dp))
         }
     }
 
@@ -189,6 +193,26 @@ fun GarageScreen(vm: MainViewModel, modifier: Modifier) {
     editPart?.let { p -> PartDialog(p, onDismiss = { editPart = null }, onSave = { vm.store.upsertPart(it); editPart = null }, onDelete = { vm.store.removePart(p.id); editPart = null }) }
     editDriver?.let { d -> DriverDialog(d, onDismiss = { editDriver = null }, onSave = { vm.store.upsertDriver(it); editDriver = null }, onDelete = { vm.store.removeDriver(d.id); editDriver = null }) }
     if (editAccount) AccountDialog(g, onDismiss = { editAccount = false }) { ng -> vm.store.update { it.copy(garage = ng) }; editAccount = false }
+}
+
+/** Reforço como no jogo: garrafa na cor do bônus principal, os 3 bônus e a quantidade. */
+@Composable
+private fun BoosterTile(b: com.leandro.f1clashcoach.core.engine.BoosterOwned) {
+    val main = b.def?.effects?.maxByOrNull { it.value }?.key
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Navy).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        BottleIcon(main?.let { boostColor(it) } ?: Muted, 34.dp)
+        Spacer(Modifier.width(6.dp))
+        Column(Modifier.weight(1f)) {
+            Text(b.name, fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            b.def?.effects?.entries?.sortedByDescending { it.value }?.forEach { (st, v) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(RoundedCornerShape(50)).background(boostColor(st)))
+                    Text(" ${st.label} +$v", fontSize = 10.sp, color = Muted)
+                }
+            } ?: Text("bônus não catalogado", fontSize = 10.sp, color = Muted)
+        }
+        Text("${b.count}", fontSize = 20.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic, color = Color.White)
+    }
 }
 
 /** Detalhe de uma carta: atributos (atual, próximo nível e máximo), gráfico por nível e custos. */

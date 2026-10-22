@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -186,59 +187,61 @@ fun LevelChart(totals: List<Int>, current: Int?, color: Color, modifier: Modifie
     }
 }
 
-/** Carta da coleção: cor da raridade, ícone, nível, cartas e selos. Cinza com cadeado se você não tem. */
+/** Carta no formato do jogo: foto, faixa branca com o nome e barra "nível | cartas" (verde quando dá para evoluir). */
 @Composable
 fun AssetCard(item: CollectionItem, onClick: () -> Unit) {
     val c = rarityColor(item.rarity)
     val canUp = item.owned && item.cardsNeeded > 0 && item.cardsOwned >= item.cardsNeeded && (item.level ?: 0) < item.maxLevel
+    val shape = RoundedCornerShape(8.dp)
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(Panel)
-            .border(if (item.equipped) 2.dp else 1.dp, if (item.equipped) Good else c.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+        Modifier.fillMaxWidth().clip(shape).background(if (item.owned) Color.White else Color(0xFFC9C6DA))
+            .border(if (item.equipped) 2.dp else 0.dp, if (item.equipped) Mint else Color.Transparent, shape)
             .clickable { onClick() },
     ) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(1.05f)
-                .background(Brush.linearGradient(listOf(c.copy(alpha = if (item.owned) 0.95f else 0.25f), c.copy(alpha = if (item.owned) 0.45f else 0.12f)))),
+            Modifier.fillMaxWidth().aspectRatio(0.86f)
+                .background(if (item.owned) Brush.linearGradient(listOf(c, c.copy(alpha = 0.75f))) else Brush.linearGradient(listOf(Color(0xFFB4B0C9), Color(0xFFA29DBB)))),
             contentAlignment = Alignment.Center,
         ) {
             val ctx = androidx.compose.ui.platform.LocalContext.current
             val key = com.leandro.f1clashcoach.art.ArtStore.keyFor(item)
             val art = androidx.compose.runtime.remember(key, com.leandro.f1clashcoach.art.ArtStore.version) { com.leandro.f1clashcoach.art.ArtStore.load(ctx, key) }
-            if (art != null) {
-                androidx.compose.foundation.Image(
-                    art.asImageBitmap(), item.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().alpha(if (item.owned) 1f else 0.4f),
-                    colorFilter = if (item.owned) null else androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) }),
-                )
-            } else Box(Modifier.alpha(if (item.owned) 1f else 0.45f)) {
-                if (item.isDriver) HelmetIcon(Color.White, 46.dp, c.copy(alpha = 0.9f).compositeDark())
-                else PartIcon(item.slot ?: PartSlot.ENGINE, Color.White, 46.dp, c.compositeDark())
-            }
-            if (item.owned) {
-                Text("${item.level ?: "?"}", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White,
-                    modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 6.dp, vertical = 1.dp))
+            if (!item.owned) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (item.series > 0) {
+                        Text("SÉRIE", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color.White)
+                        Text("${item.series}", fontSize = 26.sp, fontWeight = FontWeight.Black, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, color = Color.White, lineHeight = 26.sp)
+                    } else Text("🔒", fontSize = 20.sp)
+                }
+            } else if (art != null) {
+                androidx.compose.foundation.Image(art.asImageBitmap(), item.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
-                Text("🔒 S${item.series}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                    modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.5f)).padding(horizontal = 5.dp, vertical = 1.dp))
+                if (item.isDriver) HelmetIcon(Color.White, 34.dp, c.compositeDark())
+                else PartIcon(item.slot ?: PartSlot.ENGINE, Color.White, 34.dp, c.compositeDark())
             }
-            if (canUp) Text("⬆", fontSize = 13.sp, fontWeight = FontWeight.Black, color = Color.White,
-                modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).size(20.dp).clip(CircleShape).background(Good), textAlign = TextAlign.Center)
-            if (item.featured) Text("+10%", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color.Black,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).clip(RoundedCornerShape(5.dp)).background(Gold).padding(horizontal = 4.dp))
-            if (item.equipped) Text("✓", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White,
-                modifier = Modifier.align(Alignment.BottomStart).padding(4.dp).size(18.dp).clip(CircleShape).background(Good), textAlign = TextAlign.Center)
+            if (canUp) Text("⬆", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(3.dp).size(16.dp).clip(RoundedCornerShape(4.dp)).background(Mint), textAlign = TextAlign.Center)
+            if (item.featured) Text("+10%", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Ink,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp).clip(RoundedCornerShape(3.dp)).background(Yellow).padding(horizontal = 3.dp))
+            if (item.equipped) Text("✓", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White,
+                modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(16.dp).clip(RoundedCornerShape(4.dp)).background(Mint), textAlign = TextAlign.Center)
         }
-        Column(Modifier.padding(horizontal = 6.dp, vertical = 5.dp)) {
-            Text(item.gameName ?: item.name, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (item.owned && item.cardsNeeded > 0) {
-                ProgressLine(item.cardsOwned.toFloat() / item.cardsNeeded, if (canUp) Good else Sky, height = 5.dp)
-                Text("${item.cardsOwned}/${item.cardsNeeded}", fontSize = 9.sp, color = Muted)
-            } else if (item.owned) {
-                Text(if ((item.level ?: 0) >= item.maxLevel) "Nível máximo" else "Cartas ?", fontSize = 9.sp, color = Muted)
-            } else {
-                Text("Não tenho", fontSize = 9.sp, color = Muted)
-            }
+        Text(item.gameName ?: item.name, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().background(if (item.owned) Color.White else Color(0xFFDAD7E8)).padding(horizontal = 4.dp, vertical = 1.dp))
+        Row(Modifier.fillMaxWidth().height(18.dp).background(if (canUp) Mint else if (item.owned) Navy else Color(0xFF8F8AA8)), verticalAlignment = Alignment.CenterVertically) {
+            if (item.owned) {
+                Box(Modifier.fillMaxHeight().width(18.dp).background(Color.Black.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                    Text("${item.level ?: "?"}", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White)
+                }
+                Text(
+                    when {
+                        (item.level ?: 0) >= item.maxLevel -> "MÁX"
+                        item.cardsNeeded > 0 -> "${item.cardsOwned}/${item.cardsNeeded}"
+                        else -> ""
+                    }, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.End, maxLines = 1,
+                    modifier = Modifier.weight(1f).padding(end = 3.dp),
+                )
+            } else Text("🔒", fontSize = 9.sp, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -278,7 +281,7 @@ fun Legend(items: List<Pair<String, Color>>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(c))
                 Spacer(Modifier.width(4.dp))
-                Text(t, fontSize = 11.sp, color = Muted)
+                Text(t, fontSize = 11.sp, color = InkMuted)
             }
         }
     }

@@ -486,13 +486,17 @@ class FrameProcessor(
         val d = app.store.data.value
         val now = System.currentTimeMillis()
         val rep = com.leandro.f1clashcoach.core.engine.ClubManager.evaluate(d.club, d.garage.playerName, now)
-        if (rep.kicks.isEmpty()) {
-            overlay.showMessage("👥 Clube: ${rep.summary.first()}\n✅ Ninguém para excluir agora.", pin = false)
+        fun dot(u: Int) = if (u == 2) "🔴 " else if (u == 1) "🟡 " else "⚪ "
+        val parts = buildList {
+            if (rep.kicks.isNotEmpty()) add("🚪 Excluir\n" + rep.kicks.take(5).joinToString("\n") { k -> dot(k.urgency) + "${k.name} (${k.role}): ${k.reason}" })
+            if (rep.demotions.isNotEmpty()) add("⬇ Rebaixar\n" + rep.demotions.take(3).joinToString("\n") { k -> dot(k.urgency) + "${k.name}: ${k.reason}" })
+            if (rep.promotions.isNotEmpty()) add("⬆ Promover\n" + rep.promotions.take(3).joinToString("\n") { k -> dot(k.urgency) + "${k.name}: ${k.reason}" })
+        }
+        if (parts.isEmpty()) {
+            overlay.showMessage("👥 Clube: ${rep.summary.firstOrNull() ?: ""}\n✅ Ninguém para excluir, rebaixar ou promover agora.", pin = false)
             return
         }
-        overlay.showMessage("👥 Clube • quem excluir\n" + rep.kicks.take(5).joinToString("\n") { k ->
-            (if (k.urgency == 2) "🔴 " else if (k.urgency == 1) "🟡 " else "⚪ ") + "${k.name} (${k.role}): ${k.reason}"
-        } + "\n⏰ ${rep.whenToAct}", pin = false)
+        overlay.showMessage("👥 Clube\n" + parts.joinToString("\n") + "\n⏰ ${rep.whenToAct}", pin = false)
         val day = java.time.LocalDate.now().toString()
         val fresh = rep.kicks.filter { it.urgency >= 1 && d.club.notified[it.name] != day }
         if (fresh.isNotEmpty()) {

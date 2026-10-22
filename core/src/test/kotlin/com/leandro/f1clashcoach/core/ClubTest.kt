@@ -3,6 +3,7 @@ package com.leandro.f1clashcoach.core
 import com.leandro.f1clashcoach.core.engine.ClubManager
 import com.leandro.f1clashcoach.core.engine.ClubMemberRead
 import com.leandro.f1clashcoach.core.engine.ClubState
+import com.leandro.f1clashcoach.core.engine.ClubManager as CM
 import com.leandro.f1clashcoach.core.engine.DuelOddsCalc
 import com.leandro.f1clashcoach.core.engine.StoreWatch
 import com.leandro.f1clashcoach.core.engine.TrackPlaybook
@@ -87,5 +88,46 @@ class ClubTest {
         val play = TrackPlaybook.forTrack(races, "monza")!!
         assertEquals("M→H", play.bestStrategy)
         assertEquals(listOf("Max Verstappen"), StoreWatch.matches(listOf("Max Verstappen", "Hex"), listOf("M. Verstappen")))
+    }
+}
+
+class ClubRuleTest {
+    private val day = 86_400_000L
+    private val rule = "Zero Estrelas na Exibição Atual e < 100 na Anterior, Exclusão. 2k em duas seguidas, Promoção. < 500 Rebaixado."
+
+    @Test fun parsesFlaRule() {
+        val r = ClubManager.parseRules(rule)
+        assertEquals(0, r.kickCurrentMax); assertEquals(100, r.kickPrevBelow)
+        assertEquals(2000, r.promoteMin); assertEquals(2, r.promoteSeasons); assertEquals(500, r.demoteBelow)
+    }
+
+    @Test fun appliesFlaRuleAcrossExhibitions() {
+        val t0 = 1_000_000_000_000L
+        var s = ClubState(rules = ClubManager.parseRules(rule), leagueName = "Exibicao69")
+        s = ClubManager.merge(s, listOf(
+            ClubMemberRead("Parado", "Membro", 50), ClubMemberRead("Craque", "Membro", 2500),
+            ClubMemberRead("Capitao Fraco", "Capitão", 300), ClubMemberRead("Ok", "Membro", 900),
+        ), t0)
+        s = s.copy(leagueName = "Exibição 70", leagueEndsAt = t0 + 20 * day + 36 * 3600_000L)
+        s = ClubManager.merge(s, listOf(
+            ClubMemberRead("Parado", "Membro", 0), ClubMemberRead("Craque", "Membro", 2100),
+            ClubMemberRead("Capitao Fraco", "Capitão", 200), ClubMemberRead("Ok", "Membro", 0), ClubMemberRead("Novato", "Membro", 0),
+        ), t0 + 20 * day)
+        val rep = ClubManager.evaluate(s, "Eu", t0 + 20 * day)
+        val kick = rep.kicks.associateBy { it.name }
+        assertEquals(2, kick.getValue("Parado").urgency)           // 0 agora e 50 (<100) antes, Exibição acabando
+        assertTrue(!kick.containsKey("Ok"))                         // 0 agora mas 900 antes: fica
+        assertEquals(0, kick.getValue("Novato").urgency)           // sem Exibição anterior: conferir
+        assertTrue(rep.promotions.any { it.name == "Craque" && it.urgency == 1 })
+        assertTrue(rep.demotions.any { it.name == "Capitao Fraco" })
+        assertTrue(rep.whenToAct.startsWith("Agora"))
+    }
+
+    @Test fun mergesMemberOcrVariants() {
+        var s = ClubManager.merge(ClubState(), listOf(ClubMemberRead("romulom0684", "Membro", 90), ClubMemberRead("Zane", "Membro", 120),
+            ClubMemberRead("Marti Romeo", "Membro", 45), ClubMemberRead("Mariana Giménez", "Membro", 50)), 0)
+        s = ClubManager.merge(s, listOf(ClubMemberRead("rormulon0684", "Membro", 90), ClubMemberRead("2ane", "Membro", 120),
+            ClubMemberRead("LMarti Romneo", "Membro", 60), ClubMemberRead("Mariana Girménez", "Membro", 50)), day)
+        assertEquals(s.members.map { it.name }.toString(), 4, s.members.size)
     }
 }

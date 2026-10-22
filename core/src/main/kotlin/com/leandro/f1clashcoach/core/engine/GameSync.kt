@@ -92,8 +92,9 @@ object GameSync {
         fun findDriver(name: String) = drivers.indexOfFirst { key(it.name) == key(name) }
         val unknown = com.leandro.f1clashcoach.core.model.Rarity.UNKNOWN
         // O mesmo piloto existe em 3 raridades (cartas azul/laranja/roxa): casa por nome + raridade.
+        val dk = com.leandro.f1clashcoach.core.model.Catalog::driverKey
         fun findTile(t: GridTile): Int {
-            val same = drivers.indices.filter { key(drivers[it].name) == key(t.name) }
+            val same = drivers.indices.filter { dk(drivers[it].name) == dk(t.name) }
             val special = com.leandro.f1clashcoach.core.model.Rarity.SPECIAL
             // edição especial só casa com a mesma edição especial (nunca com a carta normal do piloto)
             if (t.rarity == special) return same.firstOrNull { drivers[it].rarity == special && drivers[it].edition == (t.edition ?: "") } ?: -1
@@ -172,8 +173,8 @@ object GameSync {
         for (i in drivers.indices) if (!drivers[i].featured && isFeat(drivers[i].name)) drivers[i] = drivers[i].copy(featured = true)
         for (i in parts.indices) if (!parts[i].featured && isFeat(parts[i].name)) parts[i] = parts[i].copy(featured = true)
 
-        // Catálogo da temporada: nível pelas cartas, atributos e custo de cada nível.
-        g = com.leandro.f1clashcoach.core.model.Catalog.enrich(g.copy(parts = parts, drivers = drivers, updatedAt = now))
+        // Catálogo da temporada: nome oficial, sem cartas repetidas; nível pelas cartas, atributos e custo de cada nível.
+        g = com.leandro.f1clashcoach.core.model.Catalog.let { c -> c.enrich(c.dedupe(g.copy(parts = parts, drivers = drivers, updatedAt = now))) }
 
         // ---- Objetivos ----
         var objectives: List<Objective>? = null

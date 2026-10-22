@@ -71,7 +71,7 @@ fun TyreBadge(t: Tyre, size: Dp = 34.dp) {
     }
 }
 
-private fun boostColor(s: BoostStat): Color = when (s) {
+fun boostColor(s: BoostStat): Color = when (s) {
     BoostStat.OVERTAKING, BoostStat.OVERTAKE_MODE -> Color(0xFFE10600)
     BoostStat.DEFENDING -> Color(0xFF3FA9F5)
     BoostStat.RACE_START -> Color(0xFFF2811D)

@@ -170,26 +170,23 @@ fun AppRoot(
                     if (sub != null) IconButton(onClick = { sub = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") }
                 },
                 actions = {
+                    IconButton(onClick = { sub = SubScreen.AI }) { Icon(Icons.Filled.AutoAwesome, "Perguntar à IA") }
                     IconButton(onClick = { sub = SubScreen.NEWS }) { Icon(Icons.Filled.Newspaper, "Notícias") }
                     IconButton(onClick = { sub = SubScreen.SETTINGS }) { Icon(Icons.Filled.Settings, "Ajustes") }
                 },
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = Panel) {
+            NavigationBar(containerColor = Navy) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(selected = sub == null && tab == t, onClick = { tab = t; sub = null },
-                        icon = { Icon(t.icon, t.label) }, label = { Text(t.label) })
+                        icon = { Icon(t.icon, t.label) }, label = { Text(t.label, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                            selectedIconColor = Ink, selectedTextColor = Yellow, indicatorColor = Yellow,
+                            unselectedIconColor = Muted, unselectedTextColor = Muted,
+                        ))
                 }
             }
-        },
-        floatingActionButton = {
-            if (sub == null) androidx.compose.material3.ExtendedFloatingActionButton(
-                onClick = { sub = SubScreen.AI },
-                containerColor = F1Red, contentColor = androidx.compose.ui.graphics.Color.White,
-                icon = { Icon(Icons.Filled.AutoAwesome, null) },
-                text = { Text("Coach IA", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-            )
         },
     ) { padding ->
         val m = Modifier.padding(padding)

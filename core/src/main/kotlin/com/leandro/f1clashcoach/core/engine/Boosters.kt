@@ -36,7 +36,17 @@ object Boosters {
     private val S = BoostStat.SPEED; private val C = BoostStat.CORNERING; private val P = BoostStat.POWER_UNIT; private val PIT = BoostStat.PIT
     private val OM = BoostStat.OVERTAKE_MODE
 
+    /** Os 45 reforços vistos nas telas do usuário (out/2026). Ícones: ver CLAUDE.md. */
     val all: List<BoosterDef> = listOf(
+        b("Autocontrole", T to 5, C to 5, P to 5),
+        b("Guerreiro", O to 5, D to 5, S to 10),
+        b("Lastro", L to 5, C to 10, PIT to 5),
+        b("Instinto", T to 5, L to 10, P to 15),
+        b("Sustentação negativa", D to 10, T to 15, C to 5),
+        b("Hex", O to 20, S to 15, PIT to 5),
+        b("Exceção", D to 15, P to 10, PIT to 25),
+        b("Escaldante", O to 15, C to 25, OM to 10),
+        b("Fique ligado", S to 10, C to 15, PIT to 25),
         b("Príncipe", D to 10, L to 20, C to 20),
         b("Djinn", D to 15, C to 15, P to 20),
         b("Oud", O to 15, C to 10, PIT to 25),
@@ -52,12 +62,37 @@ object Boosters {
         b("Arando", O to 20, D to 20, C to 10),
         b("Natal", O to 10, S to 20, C to 20),
         b("Coroa", D to 5, T to 20, PIT to 25),
+        b("Campeão", L to 10, S to 25, P to 15),
+        b("Rookie Rush", D to 15, T to 25, L to 10),
+        b("Atemporal", L to 15, S to 10, C to 25),
+        b("Escuna", D to 10, L to 25, PIT to 15),
+        b("Glitz", O to 15, C to 15, P to 20),
+        b("Merlion", S to 15, C to 25, PIT to 10),
+        b("Czar", D to 10, T to 25, C to 15),
+        b("Tulipa", D to 10, S to 20, PIT to 20),
+        b("Mortalmente Rápido", T to 5, S to 25, P to 20),
+        b("Gancho", D to 15, L to 10, C to 25),
+        b("Tango", O to 25, S to 15, C to 10),
+        b("Arauto", O to 10, L to 25, C to 15),
+        b("Tire Water", T to 10, C to 5, PIT to 5),
+        b("Dragão", O to 20, T to 15, P to 15),
+        b("Sob Tensão Plus", O to 20, S to 15, OM to 20),
+        b("Pretzel", T to 25, P to 15, PIT to 10),
+        b("Sobrecarga", L to 20, S to 15, OM to 15),
+        b("Champignon", S to 20, OM to 35),
+        b("Guidão", D to 25, T to 15, C to 10),
+        b("Combustível de ghoul", O to 25, P to 10, PIT to 15),
+        b("Confete", O to 10, L to 25, PIT to 15),
     )
 
     fun find(name: String): BoosterDef? {
         val k = Txt.compact(name).replace('Z', 'A')
         if (k.length < 3) return null
-        return all.firstOrNull { val d = Txt.compact(it.name); d == k || (k.length >= 4 && (d.startsWith(k) || k.startsWith(d))) || (d.length >= 5 && Txt.lev(d, k, 2) <= 1) }
+        fun key(d: BoosterDef) = Txt.compact(d.name).replace('Z', 'A')
+        all.firstOrNull { key(it) == k }?.let { return it }
+        // nome cortado pelo OCR ("Transmissão" de "Transmissão Máxima", "Tang" de "Tango")
+        all.filter { k.length >= 4 && key(it).startsWith(k) }.singleOrNull()?.let { return it }
+        return all.firstOrNull { key(it).length >= 5 && Txt.lev(key(it), k, 2) <= (if (k.length >= 9) 2 else 1) }
     }
 
     fun owned(counts: Map<String, Int>): List<BoosterOwned> =

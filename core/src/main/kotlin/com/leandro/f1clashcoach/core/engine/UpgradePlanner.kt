@@ -76,7 +76,8 @@ object UpgradePlanner {
         var coins = garage.coins
         val doNow = mutableListOf<UpgradeAdvice>()
         for (a in ranked.filter { it.canUpgradeNow && it.gain > 0 }) {
-            if (a.coins == 0 || a.coins <= coins) {
+            // custo desconhecido (0) não entra como "de graça": só o que dá para pagar de verdade
+            if (a.coins > 0 && a.coins <= coins) {
                 doNow += a
                 coins -= a.coins
             }

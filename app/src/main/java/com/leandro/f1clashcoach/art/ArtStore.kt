@@ -20,7 +20,8 @@ object ArtStore {
     @Volatile var version = 0
         private set
 
-    private fun dir(ctx: Context) = File(ctx.filesDir, "art").apply { mkdirs() }
+    // "art2": recorte novo (sem selos); as fotos antigas são ignoradas e refeitas na próxima leitura
+    private fun dir(ctx: Context) = File(ctx.filesDir, "art2").apply { mkdirs() }
 
     private fun clean(s: String) = Txt.compact(s).lowercase()
 
@@ -56,12 +57,13 @@ object ArtStore {
             }
             val f = File(dir(ctx), "$key.jpg")
             if (f.exists() && System.currentTimeMillis() - f.lastModified() < 86_400_000L) continue
-            val x0 = ((t.nameLeft - 0.008f) * w).toInt(); val y0 = ((t.nameTop - 0.098f) * h).toInt()
-            val cw = (0.206f * w).toInt(); val ch = (0.094f * h).toInt()
+            // só o miolo da foto: sem a setinha do canto e sem o selo "+10%" (o app desenha os dele)
+            val x0 = ((t.nameLeft + 0.04f) * w).toInt(); val y0 = ((t.nameTop - 0.088f) * h).toInt()
+            val cw = (0.145f * w).toInt(); val ch = (0.066f * h).toInt()
             if (x0 < 0 || y0 < 0 || x0 + cw > w || y0 + ch > h || cw < 20 || ch < 20) continue
             runCatching {
                 val crop = Bitmap.createBitmap(frame, x0, y0, cw, ch)
-                val scaled = Bitmap.createScaledBitmap(crop, 220, (220f * ch / cw).toInt().coerceAtLeast(40), true)
+                val scaled = Bitmap.createScaledBitmap(crop, 180, (180f * ch / cw).toInt().coerceAtLeast(40), true)
                 f.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 86, it) }
                 cache.remove(key)
                 saved++
